@@ -18,4 +18,4 @@ base64 = "0.22.1"
 anyhow = "1"
 serde_urlencoded = "0.7"
 bincode = "1.3"
-
+qasm_core = { path = "../qasm_core" }
