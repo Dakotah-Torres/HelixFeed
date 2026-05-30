@@ -4,6 +4,8 @@ use serde::{Serialize, Deserialize};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use super::{KRAKEN_PUB_URL, CHANNEL_BOOK_L2, kraken_trade_connect};
 
+use crate::db::buffer::DoubleBuffer; 
+
 
 
 
@@ -83,10 +85,10 @@ pub async fn kraken_book_data_feed(){
     let mut stream = kraken_trade_connect(outer, KRAKEN_PUB_URL)
         .await;
 
-
+    let buffer = DoubleBuffer::new(1000, 0.8);
     while let Some(message) = stream.next().await {
         if let Ok(Message::Text(msg)) = message {
-            println!("{}", msg)
+            buffer.push_swap_and_save(msg,  "book", "BTCUSD")
         }
     }
 }
