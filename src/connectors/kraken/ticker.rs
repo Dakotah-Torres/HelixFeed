@@ -3,14 +3,7 @@ use serde::{Serialize, Deserialize};
 
 use tokio_tungstenite::tungstenite::protocol::Message;
 
-
-
-
 use super::{KRAKEN_PUB_URL, CHANNEL_TICKER_L1, kraken_trade_connect};
-
-
-use crate::db::buffer;
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KrakenTickerReqInner {
@@ -52,10 +45,6 @@ pub struct KrakenTickerResOuter<'a> {
     
 
 } 
-
-
-
-
 
 
 pub async fn kraken_ticker_data_feed(){

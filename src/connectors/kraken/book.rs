@@ -6,11 +6,6 @@ use super::{KRAKEN_PUB_URL, CHANNEL_BOOK_L2, kraken_trade_connect};
 
 use crate::db::buffer::DoubleBuffer; 
 
-
-
-
-
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(into ="u32")]
 pub enum BookDepth {
