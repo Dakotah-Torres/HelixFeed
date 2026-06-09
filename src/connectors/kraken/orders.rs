@@ -2,7 +2,7 @@ use std::env;
 use futures_util::StreamExt;
 use serde::{Serialize, Deserialize};
 use tokio_tungstenite::tungstenite::protocol::Message;
-use super::{KRAKEN_AUTH_URL, CHANNEL_ORDERS_L3, kraken_trade_connect};
+use crate::connectors::kraken::connector::{KRAKEN_AUTH_URL, CHANNEL_ORDERS_L3, kraken_trade_connect};
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

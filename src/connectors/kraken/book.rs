@@ -2,7 +2,7 @@ use futures_util::StreamExt;
 use serde::{Serialize, Deserialize};
 
 use tokio_tungstenite::tungstenite::protocol::Message;
-use super::{KRAKEN_PUB_URL, CHANNEL_BOOK_L2, kraken_trade_connect};
+use crate::connectors::kraken::connector::{KRAKEN_PUB_URL, CHANNEL_BOOK_L2, kraken_trade_connect};
 
 use crate::db::buffer::DoubleBuffer; 
 

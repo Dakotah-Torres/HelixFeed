@@ -5,7 +5,7 @@ use std::io::Read;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Markets {
+pub enum Market {
     Crypto, 
     Futures,
     Forex, 
@@ -14,7 +14,14 @@ pub enum Markets {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum DataFeeds {
+pub enum Mode {
+    Normalized,
+    Raw
+    
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SupportedFeeds {
     Trades, 
     Book,
     Candles, 
@@ -22,12 +29,32 @@ pub enum DataFeeds {
     Ticks
 }
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DataFeeds {
+    Trades(Mode), 
+    Book(Mode),
+    Candles(Mode), 
+    Orders(Mode),
+    Ticks(Mode)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SymbolConfig {
+    pub symbol: String, 
+    pub data: Vec<DataFeeds>
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Feeds{
     pub provider: String, 
-    pub markets: Vec<Markets>,
-    pub symbols: Vec<String>,
-    pub data_types: Vec<DataFeeds>
+    pub markets: Vec<Market>,
+    pub log_location: String, 
+    pub db_location: String,
+    pub reconnect_delay_secs: u32,
+    pub max_reconnect_attempts: u32,
+    pub symbols: Vec<SymbolConfig>,
 }
 
 #[derive(Debug, Deserialize)]

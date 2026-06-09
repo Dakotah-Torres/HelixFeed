@@ -1,0 +1,34 @@
+feeds:
+  - provider: kraken
+    markets:
+      - crypto
+    db_location: "/db/kraken.duckdb"
+    log_location: "logs/kraken.log"
+    max_reconnect_attempts: 5
+    reconnect_delay_secs: 5
+    symbols:
+      - symbol: BTC/USD
+        data:
+          - trades: normalized
+          - book: raw
+      - symbol: ETH/USD
+        data:
+          - trades: normalized
+          - book: raw
+
+  - provider: databento
+    markets:
+      - futures
+    db_location: "/db/databento.duckdb"
+    log_location: "logs/databento.log"
+    max_reconnect_attempts: 5
+    reconnect_delay_secs: 5
+    symbols:
+      - symbol: MNQ
+        data:
+          - trades: normalized
+          - book: normalized
+          - candles: raw
+      - symbol: ES
+        data:
+          - trades: normalized

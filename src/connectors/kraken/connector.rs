@@ -10,10 +10,13 @@ use sha2::{Sha256, Digest, Sha512};
 use hmac:: { Hmac, Mac, KeyInit};
 use base64::{Engine as _, engine::general_purpose};
 pub use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio::sync::mpsc;
 
-use crate::connectors::traits::DataFeed;
-use crate::config::DataFeeds;
-use crate::config::Markets;
+use crate::connectors::traits::NormalizedMessage;
+use crate::connectors::traits::DataProvider;
+use crate::connectors::traits::{TickFeed, TradeFeed,BookFeed, OrdersFeed};
+use crate::config::SupportedFeeds;
+use crate::config::Market;
 use crate::connectors::kraken::ticker::KrakenTickerResOuter;
 
 type HmacSha512 = Hmac<Sha512>;
@@ -27,6 +30,9 @@ pub const CHANNEL_BOOK_L2: &str = "book";
 pub const CHANNEL_TICKER_L1: &str = "ticker";
 pub const CHANNEL_ORDERS_L3: &str = "level3";
 pub const CHANNEL_TRADES: &str = "trade";
+
+
+use crate::connectors::kraken::ticker::kraken_ticker_data_feed;
 
 pub async fn kraken_trade_connect<T: Serialize>(connection_request: T, _url:&str) -> KrakenReadStream {
 
@@ -107,36 +113,50 @@ pub async fn get_kraken_ws_token() -> Result<String, anyhow::Error> {
 
 pub struct KrakenConnector; 
 
-impl DataFeed for KrakenConnector {
-    type RawMessage<'a> = KrakenTickerResOuter<'a>; 
+impl DataProvider for KrakenConnector {
 
     fn provider_name(&self) -> &str {
         "Kraken"
     }
 
-    fn supported_data_feeds(&self) -> Vec<crate::config::DataFeeds> {
+    fn supported_data_feeds(&self) -> Vec<crate::config::SupportedFeeds> {
         let feeds = vec![
-            DataFeeds::Trades,
-            DataFeeds::Book,
-            DataFeeds::Orders,
-            DataFeeds::Ticks,
+            SupportedFeeds::Trades,
+            SupportedFeeds::Book,
+            SupportedFeeds::Orders,
+            SupportedFeeds::Ticks,
         ];
         feeds
     }
 
-    fn supported_markets(&self) -> Vec<Markets> {
+    fn supported_markets(&self) -> Vec<Market> {
         let markets = vec![
-            Markets::Crypto
+            Market::Crypto
         ];
         markets
     }
 
-    fn normalize(&self, raw: Self::RawMessage<'a>) -> super::traits::NormalizedMessage {
-        todo!()   
-    }
-
-    fn raw(&self) -> Self::RawMessage<'a> {
-        todo!()
-    }
-
 }
+
+// impl TickFeed for KrakenConnector {
+//     type RawMessage<'a> =  KrakenTickerResOuter<'a>;
+//     fn tick_normalized_feed<'a> (&self, _raw: Self::RawMessage<'a> ) -> NormalizedMessage {
+//         todo!()
+//     }
+//     #[tokio::tick_raw_feed]
+//     fn tick_raw_feed() {
+//         let (tx, mut rx) = mpsc::channel::<String>(100);
+
+//         tokio::spawn(async move {
+//             kraken_ticker_data_feed(tx).await;
+//         }); 
+ 
+//         while let Some(msg) = rx.recv().await {
+//             print!("Received: {}", msg)
+//             Self::RawMessage<'a>
+//         }   
+//     }
+    
+// }
+
+

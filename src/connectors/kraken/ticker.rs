@@ -2,8 +2,9 @@ use futures_util::StreamExt;
 use serde::{Serialize, Deserialize};
 
 use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio::sync::mpsc;
 
-use super::{KRAKEN_PUB_URL, CHANNEL_TICKER_L1, kraken_trade_connect};
+use crate::connectors::kraken::connector::{KRAKEN_PUB_URL, CHANNEL_TICKER_L1, kraken_trade_connect};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KrakenTickerReqInner {
@@ -47,11 +48,11 @@ pub struct KrakenTickerResOuter<'a> {
 } 
 
 
-pub async fn kraken_ticker_data_feed(){
+pub async fn kraken_ticker_data_feed(tx: mpsc::Sender<String>){
     println!(" ------ Ticker Engine Starting ------ ");
     let inner = KrakenTickerReqInner {
         channel: CHANNEL_TICKER_L1.to_string(),
-        symbol: vec!["BTC/USD".to_string()],
+        symbol: vec!["BTC/USD".to_string()], //this will be all the symboles that are set in the config file
         snapshot: false,
     };
     let outer = KrakenTickerReqOuter {
@@ -65,9 +66,14 @@ pub async fn kraken_ticker_data_feed(){
 
     while let Some(message) = stream.next().await {
         if let Ok(Message::Text(msg)) = message {
-            println!("{}", msg);
+            if tx.send(msg).await.is_err() {
+                print!("Ticker: receiver dropped, shutting down.");
+                break;
+            }
         }
     }
 }
+
+
 
 
