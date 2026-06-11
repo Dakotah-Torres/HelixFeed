@@ -38,7 +38,7 @@ impl DataBuffer {
             .as_millis()
             .to_string();
         
-        let base_dir = std::env::var("HELIX_DATA_DIR").unwrap_or_else(|_| ".".to_string());
+        
         let file_path = format!("{}_{}_{}.bin", stream_type, symbol, timestamp);
         let file = File::create(&file_path)?;
 
