@@ -22,3 +22,4 @@ qasm_core = { path = "../qasm_core" }
 serde_yaml = "0.9.34"
 duckdb = "1.10503.1"
 simd-json = "0.17.0"
+chrono = "0.4.45"

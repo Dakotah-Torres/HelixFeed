@@ -3,3 +3,4 @@ pub mod parser;
 pub mod db;
 pub mod config;
 pub mod run_feed;
+pub mod logging;
