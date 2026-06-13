@@ -1,6 +1,12 @@
 use crate::logging::logger::Logger; 
+use crate::metrics::prometheus::{register_metrics, start_metrics_server};
+
+// at the top of run_feed()
 
 pub async fn run_feed(config: &str) -> Result<(), anyhow::Error> {
+    register_metrics();
+    tokio::spawn(start_metrics_server());
+
     let config = crate::config::load_config(config)?;
     for feed in config.feeds {
         match feed.provider.as_str() {
@@ -22,6 +28,6 @@ pub async fn run_feed(config: &str) -> Result<(), anyhow::Error> {
             }
         }
     }
-
+    tokio::signal::ctrl_c().await?;
     Ok(())
 }
