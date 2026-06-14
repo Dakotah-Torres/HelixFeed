@@ -1,5 +1,5 @@
 feeds:
-  - provider: kraken
+  - provider: binace
     markets: [ crypto ]
     db_location: "/db/kraken.duckdb"
     log_location: "logs/kraken.log"
