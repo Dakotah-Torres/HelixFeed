@@ -3,6 +3,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::time:: {SystemTime, UNIX_EPOCH};
 use std::sync::{ Mutex};
+use crate::metrics::prometheus::BUFFER_SWAPS_TOTAL;
+use crate::logging::logger::Logger; 
+use crate::logging::logger::LoggerContext;
 
 pub struct DataBuffer {
     messages: Vec<String>,
@@ -28,10 +31,11 @@ impl DataBuffer {
     }
 
     pub fn trigger_swap(&self) -> bool {
-      self.messages.len() >= (self.capacity as f32 * self.cap_trigger) as usize 
+        
+        self.messages.len() >= (self.capacity as f32 * self.cap_trigger) as usize 
     }
 
-    pub fn save_and_clean(&mut self, stream_type: &str, symbol: &str) -> Result<String, anyhow::Error> {
+    pub fn save_and_clean(&mut self, stream_type: &str, symbol: &str, db_location: &str) -> Result<String, anyhow::Error> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
@@ -39,7 +43,7 @@ impl DataBuffer {
             .to_string();
         
         
-        let file_path = format!("{}_{}_{}.bin", stream_type, symbol, timestamp);
+        let file_path = format!("{}/{}_{}_{}.bin", db_location, stream_type, symbol, timestamp);
         let file = File::create(&file_path)?;
 
         let mut writer = BufWriter::new(file);
@@ -74,13 +78,17 @@ impl DoubleBuffer {
         }
     }
 
-    pub fn push_swap_and_save(&self, message: String, stream_type: &str, symbol: &str) {
+    pub fn push_swap_and_save(&self, message: String, stream_type: &str, symbol: &str, provider: &str, db_location: &str, logger: &mut Logger, ctx: &LoggerContext) {
+        logger.log_info("Initiating Push To Buffer".to_string(), ctx);
         let mut buffer = self.inner.lock().unwrap();
         let inner: &mut Inner = &mut *buffer;
             inner.active.push_message(message);
             if inner.active.trigger_swap() {
+                logger.log_info(format!("Buffer Trigger Limit Reached | Initiating Saving"), ctx);
                 std::mem::swap(&mut inner.active, &mut inner.standby);
-                let _ = buffer.standby.save_and_clean(stream_type, symbol);
+                let _ = inner.standby.save_and_clean(stream_type, symbol, db_location);
+                BUFFER_SWAPS_TOTAL.with_label_values(&[provider, symbol, stream_type]).inc();
+                logger.log_success (format!("Buffer Save Successful"), ctx);
             }
     }
 }

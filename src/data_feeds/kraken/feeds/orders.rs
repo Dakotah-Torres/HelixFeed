@@ -2,8 +2,14 @@ use std::env;
 use futures_util::StreamExt;
 use serde::{Serialize, Deserialize};
 use tokio_tungstenite::tungstenite::protocol::Message;
-use crate::connectors::kraken::connector::{KRAKEN_AUTH_URL, CHANNEL_ORDERS_L3, kraken_trade_connect};
+use crate::data_feeds::kraken::connection::connector::{KRAKEN_AUTH_URL, CHANNEL_ORDERS_L3, kraken_trade_connect};
+use std::sync::{Arc, Mutex};
+use crate::logging::logger::{Logger, LoggerContext};
+use sha2::{Sha256, Digest};
+use hex; 
 
+
+use tokio::sync::mpsc; 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(into ="u32")]
@@ -11,6 +17,14 @@ pub enum OrderDepth {
     Ten = 10,
     OneHundred = 100,
     OneThousand = 1000,
+}
+
+fn hash_string(input: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    // Efficiently encodes directly to a String
+    hex::encode(result) 
 }
 
 impl From<OrderDepth> for u32 {
@@ -64,17 +78,25 @@ pub struct KrakenOrderResObject<'a> {
 }
 
 
-pub async fn kraken_order_data_feed(){
+pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<Logger>>, log_ctx: LoggerContext){
     let api_key = env::var("KRAKEN_WEB_SOCKET_KEY")
         .expect("KRAKEN_API_SECRET not set in .env");
-    println!("------ Order Engine Starting ------ ");
-    println!("API_Key: {} ", api_key);
+    {
+        let mut log = logger.lock().unwrap();
+        log.log_started(&log_ctx);
+        log.log_info(format!("Order Engine Starting: {}", symbols.join(", ")), &log_ctx);
+        let api_hash = hash_string(&api_key);
+        log.log_info(format!("API CONNECTED | CONFIRMATION KEY: {}", api_hash), &log_ctx);
+    }
+    
+    
     let params = KrakenOrdersReqInnerParams {
-        channel: CHANNEL_ORDERS_L3.to_string(),
-        symbol: vec!["BTC/USD".to_string()],
-        depth: OrderDepth::OneHundred,
-        snapshot: false,
-        token: api_key
+    channel: CHANNEL_ORDERS_L3.to_string(),
+    symbol: symbols,
+    depth: OrderDepth::OneHundred,
+    snapshot: false,
+    token: api_key, 
+    
     };
 
     let order_request = KrakenOrdersReqOuter {
@@ -88,10 +110,15 @@ pub async fn kraken_order_data_feed(){
 
     while let Some(message) = stream.next().await {
         if let Ok(Message::Text(msg)) = message {
-            println!("{}", msg)
+            if tx.send(msg).await.is_err() {
+                let mut log = logger.lock().unwrap();
+                log.log_error("Orders: receiver dropped, shutting down".to_string(), &log_ctx);
+                break;
+            }
         }
     }
 }
+
 
 
 

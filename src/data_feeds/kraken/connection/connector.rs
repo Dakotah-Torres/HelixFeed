@@ -1,3 +1,4 @@
+pub use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio::net::TcpStream;
 use url::Url;
@@ -9,18 +10,14 @@ use std::collections::HashMap;
 use sha2::{Sha256, Digest, Sha512};
 use hmac:: { Hmac, Mac, KeyInit};
 use base64::{Engine as _, engine::general_purpose};
-pub use tokio_tungstenite::tungstenite::protocol::Message;
 
 
-
-use crate::connectors::traits::DataProvider;
-use crate::connectors::traits::ReplayCapability;
-use crate::connectors::traits::ReplayLevel;
-use crate::connectors::traits::Resolution;
+use crate::data_feeds::traits::DataProvider;
+use crate::data_feeds::traits::ReplayCapability;
+use crate::data_feeds::traits::ReplayLevel;
+use crate::data_feeds::traits::Resolution;
 use crate::config::FeedType;
 use crate::config::Market;
-
-
 
 type HmacSha512 = Hmac<Sha512>;
 
@@ -146,4 +143,6 @@ impl DataProvider for KrakenConnector {
     }
 
 }
+
+
 

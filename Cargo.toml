@@ -28,3 +28,4 @@ hyper = { version = "1", features = ["full"] }
 lazy_static = "1.5.0"
 http-body-util = "0.1.3"
 hyper-util = "0.1.20"
+hex = "0.4.3"

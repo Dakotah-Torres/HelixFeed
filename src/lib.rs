@@ -1,4 +1,4 @@
-pub mod connectors;
+pub mod data_feeds;
 pub mod parser;
 pub mod db;
 pub mod config;
