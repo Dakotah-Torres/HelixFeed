@@ -147,4 +147,5 @@ impl Logger {
         ); 
         let _ = self.writer.write_all(line.as_bytes());
     }
+
 }
