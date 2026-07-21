@@ -32,7 +32,7 @@ impl SysLogger {
         })
     }
 
-    pub fn sys_log(&mut self, log_type: LogType, message: String) {
+    pub fn sys_log(&mut self, log_type: LogType, message: &str) {
         let lable = match log_type {
             LogType::Debug => "DEBUG",
             LogType::Error => "ERROR",

@@ -3,7 +3,7 @@ use serde_yaml;
 use std::fs::File;
 use std::io::Read;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum Market {
     Crypto, 
@@ -30,18 +30,18 @@ pub enum FeedType {
     Ticks
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DataFeedConfig {
     pub feed_type: FeedType,
     pub mode: Mode
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct SymbolConfig {
     pub symbol: String, 
     pub data: Vec<DataFeedConfig>
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Feeds{
     pub provider: String, 
     pub markets: Vec<Market>,

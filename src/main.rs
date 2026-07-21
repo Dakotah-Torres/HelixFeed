@@ -1,7 +1,7 @@
-use helix_feed::runners::run_feed::run_feed;
+use helix_feed::runners::feed_runner::feed_runner;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    run_feed("helix_config.yml").await?;
+    feed_runner("helix_config.yml").await?;
     Ok(())
 }
