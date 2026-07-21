@@ -1,4 +1,4 @@
-use helix_feed::run_feed::run_feed::run_feed;
+use helix_feed::runners::run_feed::run_feed;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {

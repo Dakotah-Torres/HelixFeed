@@ -2,9 +2,12 @@ use crate::metrics::prometheus::{register_metrics, start_metrics_server};
 use crate::config::load_config;
 use crate::config::validate_config;
 use crate::data_feeds::kraken::feed::kraken_feed_aggrigatotor;
+use crate::db::migrations::run_migrations;
+use duckdb::Connection;
 // at the top of run_feed()
 
-pub async fn run_feed(config: &str) -> Result<(), anyhow::Error> {
+pub async fn feed_runner(conn: &mut Connection, config: &str) -> Result<(), anyhow::Error> {
+    run_migrations(conn);
     register_metrics();
     tokio::spawn(start_metrics_server());
 

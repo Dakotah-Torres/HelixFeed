@@ -2,8 +2,7 @@ use duckdb::{Connection, Result};
 use crate::config::Mode;
 use crate::config::FeedType;
 use crate::config::Feeds;
-
-
+use crate::db::migrations::run_migrations;
 
 
 pub struct HelixDb {
@@ -15,6 +14,12 @@ impl HelixDb {
     pub fn new(feed:Feeds ) -> Result<Self, anyhow::Error> {
         let conn = Connection::open(feed.db_location)?;
         Ok(HelixDb { feed, conn })
+    }
+
+    pub fn new_with_migration(feed: Feeds) -> Result<Self, anyhow::Error> {
+        let mut db = HelixDb::new(feed)?;
+        run_migrations(&mut db.conn)?;
+        Ok(db)
     }
 
     pub fn ensure_table(&self) -> Result<(), anyhow::Error> {
@@ -90,5 +95,4 @@ impl HelixDb {
         }
 
     }
-
 }
