@@ -33,7 +33,7 @@ impl SysLogger {
     }
 
     pub fn sys_log(&mut self, log_type: LogType, message: &str) {
-        let lable = match log_type {
+        let label = match log_type {
             LogType::Debug => "DEBUG",
             LogType::Error => "ERROR",
             LogType::Info => "INFO",
@@ -43,7 +43,7 @@ impl SysLogger {
         let line = format!(
             "[{}] [{}] | {} | {}\n", 
             Local::now().format("%Y-%m-%d %H:%M:%S"),
-            lable,
+            label,
             self.system,
             message
         ); 
