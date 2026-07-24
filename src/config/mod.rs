@@ -30,19 +30,28 @@ pub enum FeedType {
     Ticks
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug,  Clone, Deserialize)]
 pub struct DataFeedConfig {
     pub feed_type: FeedType,
     pub mode: Mode
 }
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug,  Clone, Deserialize)]
 pub struct SymbolConfig {
     pub symbol: String, 
     pub data: Vec<DataFeedConfig>
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct Feeds{
+#[derive(Debug, Clone, Deserialize)]
+pub struct PostgresConfig {
+    host: String, 
+    port: String,
+    database: String,
+    user: String, 
+    password: String
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeedConfig {
     pub provider: String, 
     pub markets: Vec<Market>,
     pub log_location: String, 
@@ -53,12 +62,13 @@ pub struct Feeds{
     pub buffer_capacity: usize,
     pub buffer_swap_trigger: f32, 
     pub r2_bucket: String, 
-    pub r2_upload_schedule: String 
+    pub r2_upload_schedule: String,
+    pub postgres_config: PostgresConfig 
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub feeds: Vec<Feeds>
+    pub feeds: Vec<FeedConfig>
 }
 
 pub fn load_config(path: &str) -> Result<Config, anyhow::Error> {
@@ -140,6 +150,9 @@ mod tests {
                         mode: Mode::Normalized,
                     }],
                 }],
+                postgres_config: PostgresConfig {
+                    host: 
+                }
             }],
         }
     }

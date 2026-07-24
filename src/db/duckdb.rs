@@ -1,6 +1,6 @@
 use duckdb::{Connection, Result};
 use crate::config::Feeds;
-use crate::db::migrations::run_migrations;
+use crate::db::duckdb_migrations::run_migrations;
 
 
 pub struct HelixDb {
