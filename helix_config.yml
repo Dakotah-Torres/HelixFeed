@@ -1,14 +1,13 @@
 feeds:
   - provider: kraken
     markets: [ crypto ]
-    db_location: "/db/kraken.duckdb"
-    log_location: "logs/kraken.log"
     max_reconnect_attempts: 5
     reconnect_delay_secs: 5
     buffer_capacity: 1000
     buffer_swap_trigger: 0.8
-    r2_bucket: "helixfeed-archive"
-    r2_upload_schedule: "weekly"
+    r2:
+      bucket: "helixfeed-archive"
+      upload_schedule: "weekly"
     symbols:
       - symbol: BTC/USD
         data:
@@ -16,3 +15,13 @@ feeds:
             mode: normalized
           - feed_type: book
             mode: raw
+
+database_and_logs_conf:
+  postgres_config:
+    host: "localhost"
+    port: "5432"
+    database: "helixfeed_dev"
+    user: "${DB_USER}"
+    password: "${DB_PASS}"
+  duckdb_location: "/db/kraken.duckdb"
+  log_location: "logs/kraken.log"

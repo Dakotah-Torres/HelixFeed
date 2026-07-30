@@ -3,15 +3,26 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::time:: {SystemTime, UNIX_EPOCH};
 use std::sync::{ Mutex};
-use crate::metrics::prometheus::BUFFER_SWAPS_TOTAL;
-use crate::logging::logger::Logger; 
-use crate::logging::logger::LoggerContext;
+use crate::logging::feed_logger::FeedLogger; 
+use crate::logging::feed_logger::LoggerContext;
+
+
 
 pub struct DataBuffer {
     messages: Vec<String>,
     capacity: usize,
     cap_trigger: f32,
 }
+
+struct DataStore {
+    active: DataBuffer,
+    standby: DataBuffer,
+}
+
+pub struct DoubleBuffer {
+    inner_store: Mutex<DataStore>,
+}
+
 
 impl DataBuffer {
     pub fn new(capacity: usize, trigger: f32) -> Self {
@@ -21,6 +32,7 @@ impl DataBuffer {
             cap_trigger: trigger,
         }
     }
+
     pub fn push_message(&mut self, message: String){
         self.messages.push(message);
     }
@@ -35,60 +47,60 @@ impl DataBuffer {
         self.messages.len() >= (self.capacity as f32 * self.cap_trigger) as usize 
     }
 
-    pub fn save_and_clean(&mut self, stream_type: &str, symbol: &str, db_location: &str) -> Result<String, anyhow::Error> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis()
-            .to_string();
-        
-        
-        let file_path = format!("{}/{}_{}_{}.bin", db_location, stream_type, symbol, timestamp);
-        let file = File::create(&file_path)?;
-
-        let mut writer = BufWriter::new(file);
-
-        bincode::serialize_into(&mut writer, &self.messages).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-        writer.flush()?;
-        self.messages.clear();
-        Ok(file_path)
+    pub fn get_messages(&self) -> Vec<String> {
+        self.messages.clone()
     }
-}
+    // pub fn save_and_clean(&mut self, stream_type: &str, symbol: &str, db_location: &str) -> Result<String, anyhow::Error> {
+    //     let timestamp = SystemTime::now()
+    //         .duration_since(UNIX_EPOCH)
+    //         .expect("Time went backwards")
+    //         .as_millis()
+    //         .to_string();
+        
+        
+    //     let file_path = format!("{}/{}_{}_{}.bin", db_location, stream_type, symbol, timestamp);
+    //     let file = File::create(&file_path)?;
 
-struct Inner {
-    active: DataBuffer,
-    standby: DataBuffer,
-}
+    //     let mut writer = BufWriter::new(file);
 
-pub struct DoubleBuffer {
-    inner: Mutex<Inner>,
-}
+    //     bincode::serialize_into(&mut writer, &self.messages).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
+    //     writer.flush()?;
+    //     self.messages.clear();
+    //     Ok(file_path)
+    // }
+}
 
 
 impl DoubleBuffer {
     pub fn new(capacity: usize, trigger: f32 ) -> Self {
         let active = DataBuffer::new(capacity, trigger);
         let standby = DataBuffer::new(capacity, trigger);
-        let inner = Inner{active, standby};
+        let inner_store = DataStore{active, standby};
 
         DoubleBuffer {
-            inner: Mutex::new(inner), 
+            inner_store: Mutex::new(inner_store), 
         }
     }
 
-    pub fn push_swap_and_save(&self, message: String, stream_type: &str, symbol: &str, provider: &str, db_location: &str, logger: &mut Logger, ctx: &LoggerContext) {
+    pub fn buffer_push_and_swap(&self, message: String, logger: &mut FeedLogger, ctx: &LoggerContext) -> Result<Option<DataBuffer>, anyhow::Error> {
         logger.log_info("Initiating Push To Buffer".to_string(), ctx);
-        let mut buffer = self.inner.lock().unwrap();
-        let inner: &mut Inner = &mut *buffer;
-            inner.active.push_message(message);
-            if inner.active.trigger_swap() {
-                logger.log_info(format!("Buffer Trigger Limit Reached | Initiating Saving"), ctx);
-                std::mem::swap(&mut inner.active, &mut inner.standby);
-                let _ = inner.standby.save_and_clean(stream_type, symbol, db_location);
-                BUFFER_SWAPS_TOTAL.with_label_values(&[provider, symbol, stream_type]).inc();
-                logger.log_success (format!("Buffer Save Successful"), ctx);
-            }
+        
+        let mut buffer = self.inner_store.lock().unwrap();
+        let inner_store: &mut DataStore = &mut *buffer;
+        inner_store.active.push_message(message);
+
+        if inner_store.active.trigger_swap() {
+            logger.log_info(format!("Buffer Trigger Limit Reached "), ctx);
+            std::mem::swap(&mut inner_store.active, &mut inner_store.standby);
+
+            let capacity = inner_store.standby.capacity;
+            let trigger = inner_store.standby.cap_trigger;
+            let return_data = std::mem::replace(&mut inner_store.standby  , DataBuffer::new(capacity, trigger));
+            Ok(Some(return_data))
+        }
+        else {
+            Ok(None)
+        }
     }
 }

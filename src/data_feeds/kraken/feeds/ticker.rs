@@ -4,10 +4,10 @@ use serde::{Serialize, Deserialize};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio::sync::mpsc;
 
-use crate::data_feeds::kraken::connection::connector::{KRAKEN_PUB_URL, CHANNEL_TICKER_L1, kraken_trade_connect};
+use crate::data_feeds::kraken::connection::connector::{KRAKEN_PUB_URL, CHANNEL_TICKER_L1, kraken_connect};
 use std::sync::{Arc, Mutex};
-use crate::logging::logger::Logger; 
-use crate::logging::logger::LoggerContext; 
+use crate::logging::feed_logger::FeedLogger; 
+use crate::logging::feed_logger::LoggerContext; 
 
 
 
@@ -54,7 +54,7 @@ pub struct KrakenTickerResOuter<'a> {
 } 
 
 
-pub async fn kraken_ticker_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<Logger>>, log_ctx: LoggerContext){
+pub async fn kraken_ticker_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext){
         {
             let mut log = logger.lock().unwrap();
             log.log_started(&log_ctx);
@@ -73,7 +73,7 @@ pub async fn kraken_ticker_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Stri
             req_id: 231,
         };
 
-        let mut stream = kraken_trade_connect(outer, KRAKEN_PUB_URL)
+        let mut stream = kraken_connect(outer, KRAKEN_PUB_URL)
                 .await;
 
         while let Some(message) = stream.next().await {

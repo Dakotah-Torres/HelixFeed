@@ -1,10 +1,10 @@
-use crate::data_feeds::kraken::connection::connector::{KRAKEN_PUB_URL, CHANNEL_TRADES, kraken_trade_connect};
+use crate::data_feeds::kraken::connection::connector::{KRAKEN_PUB_URL, CHANNEL_TRADES, kraken_connect};
 use futures_util::StreamExt;
 use serde::{Serialize, Deserialize};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use crate::logging::logger::{Logger, LoggerContext};
+use crate::logging::feed_logger::{FeedLogger, LoggerContext};
 
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -14,7 +14,7 @@ pub struct KrakenTradeInnerReq {
     pub snapshot: bool
 }
 #[derive(Serialize, Deserialize, Debug)]
-pub struct  KrakenTickerReqOuter {
+pub struct  KrakenTradeReqOuter {
     pub method: String,
     pub params: KrakenTradeInnerReq,
     pub req_id: u64, 
@@ -38,7 +38,7 @@ pub struct KrakenTradeOuterRes<'a> {
     pub data:Vec<KrakenTradeInnerRes<'a>>,
 }
 
-pub async fn kraken_trade_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<Logger>>, log_ctx: LoggerContext){
+pub async fn kraken_trade_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext){
         {
             let mut log = logger.lock().unwrap();
             log.log_started(&log_ctx);
@@ -49,13 +49,13 @@ pub async fn kraken_trade_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
             symbol: symbols, //this will be all the symboles that are set in the config file
             snapshot: false,
         };
-        let outer = KrakenTickerReqOuter {
+        let outer = KrakenTradeReqOuter {
             method: "subscribe".to_string(),
             params: inner,
             req_id: 231,
         };
 
-        let mut stream = kraken_trade_connect(outer, KRAKEN_PUB_URL)
+        let mut stream = kraken_connect(outer, KRAKEN_PUB_URL)
                 .await;
 
         while let Some(message) = stream.next().await {

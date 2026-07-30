@@ -2,9 +2,9 @@ use std::env;
 use futures_util::StreamExt;
 use serde::{Serialize, Deserialize};
 use tokio_tungstenite::tungstenite::protocol::Message;
-use crate::data_feeds::kraken::connection::connector::{KRAKEN_AUTH_URL, CHANNEL_ORDERS_L3, kraken_trade_connect};
+use crate::data_feeds::kraken::connection::connector::{KRAKEN_AUTH_URL, CHANNEL_ORDERS_L3, kraken_connect};
 use std::sync::{Arc, Mutex};
-use crate::logging::logger::{Logger, LoggerContext};
+use crate::logging::feed_logger::{FeedLogger, LoggerContext};
 use sha2::{Sha256, Digest};
 use hex; 
 
@@ -78,7 +78,7 @@ pub struct KrakenOrderResObject<'a> {
 }
 
 
-pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<Logger>>, log_ctx: LoggerContext){
+pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext){
     let api_key = env::var("KRAKEN_WEB_SOCKET_KEY")
         .expect("KRAKEN_API_SECRET not set in .env");
     {
@@ -105,7 +105,7 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
         req_id: 1234
     };
 
-    let mut stream  = kraken_trade_connect(order_request, KRAKEN_AUTH_URL)
+    let mut stream  = kraken_connect(order_request, KRAKEN_AUTH_URL)
         .await;
 
     while let Some(message) = stream.next().await {

@@ -6,7 +6,7 @@ use std::io::Write;
 use chrono::Local;
 
 
-pub struct Logger {
+pub struct FeedLogger {
     pub log_path: String, 
     pub provider: String,  
     writer: BufWriter<File>
@@ -25,7 +25,7 @@ impl LoggerContext {
     }
 }
 
-impl Logger {
+impl FeedLogger {
     pub fn new(log_path: String, provider:String) -> Result<Self, anyhow::Error> {
         let file = OpenOptions::new()
             .create(true)
@@ -34,7 +34,7 @@ impl Logger {
 
         let writer = BufWriter::new(file); 
     
-        Ok(Logger {
+        Ok(FeedLogger {
             log_path,
             provider,
             writer,

@@ -32,7 +32,7 @@ pub const CHANNEL_ORDERS_L3: &str = "level3";
 pub const CHANNEL_TRADES: &str = "trade";
 
 
-pub async fn kraken_trade_connect<T: Serialize>(connection_request: T, _url:&str) -> KrakenReadStream {
+pub async fn kraken_connect<T: Serialize>(connection_request: T, _url:&str) -> KrakenReadStream {
 
     let url = Url::parse(_url).expect("Invalid URL");
     
