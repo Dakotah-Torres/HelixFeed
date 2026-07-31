@@ -1,5 +1,4 @@
 use crate::config::FeedType;
-use crate::config::Mode;
 use std::fs::{File, OpenOptions}; 
 use std::io::BufWriter;
 use std::io::Write;
@@ -16,12 +15,11 @@ pub struct FeedLogger {
 pub struct LoggerContext {
     pub symbol: String, 
     pub feed_type: FeedType, 
-    pub mode: Mode
 }
 
 impl LoggerContext {
-    pub fn new(symbol: String, feed_type: FeedType, mode: Mode) -> Self {
-        LoggerContext { symbol, feed_type, mode }
+    pub fn new(symbol: String, feed_type: FeedType) -> Self {
+        LoggerContext { symbol, feed_type }
     }
 }
 
@@ -43,12 +41,12 @@ impl FeedLogger {
 
     pub fn log_started(&mut self , ctx: &LoggerContext) {
         let line = format!(
-            "[{}] [INFO] {} | {} | {:?} | {:?} | started\n", 
+            "[{}] [INFO] {} | {} | {:?}  | started\n", 
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             self.provider, 
             ctx.symbol,
             ctx.feed_type, 
-            ctx.mode
+            
         ); 
 
         let _ = self.writer.write_all(line.as_bytes());
@@ -56,12 +54,12 @@ impl FeedLogger {
 
     pub fn log_stopped(&mut self , ctx: &LoggerContext) {
         let line = format!(
-            "[{}] [INFO] {} | {} | {:?} | {:?} | stopped\n", 
+            "[{}] [INFO] {} | {} | {:?}  | stopped\n", 
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             self.provider, 
             ctx.symbol,
             ctx.feed_type, 
-            ctx.mode
+            
         ); 
 
         let _ = self.writer.write_all(line.as_bytes());
@@ -70,12 +68,12 @@ impl FeedLogger {
 
     pub fn log_error(&mut self, reason: String , ctx: &LoggerContext) {
         let line = format!(
-            "[{}] [ERROR] {} | {} | {:?} | {:?} | {}\n", 
+            "[{}] [ERROR] {} | {} | {:?}  | {}\n", 
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             self.provider, 
             ctx.symbol,
             ctx.feed_type, 
-            ctx.mode,
+            
             reason
         ); 
 
@@ -84,12 +82,12 @@ impl FeedLogger {
 
     pub fn log_info(&mut self, info: String , ctx: &LoggerContext) {
         let line = format!(
-            "[{}] [INFO] {} | {} | {:?} | {:?} | {}\n", 
+            "[{}] [INFO] {} | {} | {:?}  | {}\n", 
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             self.provider, 
             ctx.symbol,
             ctx.feed_type, 
-            ctx.mode,
+            
             info,
         ); 
 
@@ -98,12 +96,12 @@ impl FeedLogger {
     
     pub fn log_success(&mut self, success_msg: String , ctx: &LoggerContext) {
         let line = format!(
-            "[{}] [INFO] {} | {} | {:?} | {:?} | {}\n", 
+            "[{}] [INFO] {} | {} | {:?} | {}\n", 
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             self.provider, 
             ctx.symbol,
             ctx.feed_type, 
-            ctx.mode,
+            
             success_msg,
         ); 
 
@@ -112,12 +110,12 @@ impl FeedLogger {
 
     pub fn log_reconnecting(&mut self, attempt: u32, max: u32  , ctx: &LoggerContext) {
         let line = format!(
-            "[{}] [WARN] {} | {} | {:?} | {:?} | reconnecting attempt {}/{}\n", 
+            "[{}] [WARN] {} | {} | {:?}  | reconnecting attempt {}/{}\n", 
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             self.provider, 
             ctx.symbol,
             ctx.feed_type,
-            ctx.mode, 
+            
             attempt, 
             max
         ); 
@@ -126,24 +124,24 @@ impl FeedLogger {
 
     pub fn log_reconnected(&mut self , ctx: &LoggerContext) {
         let line = format!(
-            "[{}] [WARN] {} | {} | {:?} | {:?} | reconnected\n", 
+            "[{}] [WARN] {} | {} | {:?}  | reconnected\n", 
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             self.provider, 
             ctx.symbol,
             ctx.feed_type,
-            ctx.mode
+            
         );
         let _ = self.writer.write_all(line.as_bytes());
     }
 
     pub fn log_reconnect_failed(&mut self , ctx: &LoggerContext) {
         let line = format!(
-            "[{}] [WARN] {} | {} | {:?} | {:?} | reconnect failed\n", 
+            "[{}] [WARN] {} | {} | {:?}  | reconnect failed\n", 
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             self.provider, 
             ctx.symbol,
             ctx.feed_type,
-            ctx.mode 
+            
         ); 
         let _ = self.writer.write_all(line.as_bytes());
     }

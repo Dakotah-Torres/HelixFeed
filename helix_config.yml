@@ -1,27 +1,34 @@
-feeds:
+providers:
   - provider: kraken
-    markets: [ crypto ]
-    max_reconnect_attempts: 5
     reconnect_delay_secs: 5
-    buffer_capacity: 1000
-    buffer_swap_trigger: 0.8
-    r2:
-      bucket: "helixfeed-archive"
-      upload_schedule: "weekly"
-    symbols:
-      - symbol: BTC/USD
-        data:
-          - feed_type: trades
-            mode: normalized
-          - feed_type: book
-            mode: raw
+    max_reconnect_attempts: 5
+    symbol_feeds:
+      - markets: crypto
+        symbol: "BTC/USD"
+        feed_type: trades
+      - markets: crypto
+        symbol: "ETC/USD"
+        feed_type: trades
 
-database_and_logs_conf:
+database_conf:
   postgres_config:
-    host: "localhost"
+    host: localhost
     port: "5432"
-    database: "helixfeed_dev"
-    user: "${DB_USER}"
-    password: "${DB_PASS}"
+    database: helixfeed_dev
+    user: "helixfeed"
+    password: "devpassword"
   duckdb_location: "/db/kraken.duckdb"
-  log_location: "logs/kraken.log"
+  # r2 omitted entirely — it's Option<R2Config> with #[serde(default)], so leaving it out is valid
+
+log_config:
+  feed_log_location: "logs/kraken.log"
+  system_log_location: "logs/system.log"
+
+buffer_capacity: 100
+buffer_swap_trigger: 0.8
+  
+  
+  
+  
+  
+  

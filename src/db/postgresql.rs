@@ -19,14 +19,21 @@ impl RawRow {
         RawRow { received, data_provider, data_type, symbol , raw_json }
     }
 
-    pub fn databuff_to_rawrows(data_buffer: DataBuffer, data_provider: String, data_type: FeedType, symbol: String,) -> Result<Vec<RawRow>, anyhow::Error> {
+    pub fn data_buff_to_rawrows(data_buffer: DataBuffer) -> Result<Vec<RawRow>, anyhow::Error> {
         let mut raw_rows: Vec<RawRow> = Vec::with_capacity(data_buffer.get_messages().len()); 
         let now: DateTime<Utc> = Utc::now();
         for msg in data_buffer.get_messages() {
             let json: serde_json::Value = serde_json::from_str(&msg)?;
-            let new_row = RawRow::new(now, data_provider.clone(), data_type, symbol.clone(), msg); 
-            raw_rows.push(new_row);
+            if let Some(data_type) = data_buffer.get_data_type(){
+                if let Some(symbol) = data_buffer.get_symbol(){
+                    if let Some(provider) = data_buffer.get_provider() {
+                        let new_row = RawRow::new(now, provider, data_type , symbol, json);
+                        raw_rows.push(new_row);
+                    }
+                }
+            };
         }
+
         Ok(raw_rows)
     }
 }

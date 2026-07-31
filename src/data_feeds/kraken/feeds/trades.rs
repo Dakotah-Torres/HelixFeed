@@ -60,6 +60,16 @@ pub async fn kraken_trade_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
 
         while let Some(message) = stream.next().await {
             if let Ok(Message::Text(msg)) = message {
+                let is_trade = serde_json::from_str::<serde_json::Value>(&msg)
+                    .ok()
+                    .and_then(|v| v.get("channel").and_then(|c| c.as_str().map(|s| s.to_string())))
+                    .map(|channel| channel == "trade")
+                    .unwrap_or(false);
+                    
+                if !is_trade {
+                    continue;
+                }
+                
                 if tx.send(msg).await.is_err() {
                     let mut log = logger.lock().unwrap();
                     log.log_error("Trades: receiver dropped, shutting down".to_string(), &log_ctx);

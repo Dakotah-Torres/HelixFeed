@@ -1,21 +1,20 @@
 use duckdb::{Connection, Result};
-use crate::config::ProviderConfig;
+use crate::config::DBConfig;
 use crate::db::duckdb_migrations::run_migrations;
 
 
-pub struct HelixDb {
-    feed: ProviderConfig,
+pub struct NormalizedDuckDB {
     conn: Connection,
 }
 
-impl HelixDb {
-    pub fn new(feed:ProviderConfig ) -> Result<Self, anyhow::Error> {
-        let conn = Connection::open(feed.clone().db_location)?;
-        Ok(HelixDb { feed, conn })
+impl NormalizedDuckDB {
+    pub fn new(db_conf: DBConfig ) -> Result<Self, anyhow::Error> {
+        let conn = Connection::open( db_conf.duckdb_location)?;
+        Ok(NormalizedDuckDB { conn })
     }
 
-    pub fn new_with_migration(feed: ProviderConfig) -> Result<Self, anyhow::Error> {
-        let mut db = HelixDb::new(feed)?;
+    pub fn new_with_migration(db_conf: DBConfig) -> Result<Self, anyhow::Error> {
+        let mut db = NormalizedDuckDB::new(db_conf)?;
         run_migrations(&mut db.conn)?;
         Ok(db)
     }

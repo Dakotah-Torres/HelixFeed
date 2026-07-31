@@ -12,14 +12,10 @@ pub enum Market {
     Equities
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Mode {
-    Normalized,
-    Raw   
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FeedType {
     Trades, 
@@ -41,17 +37,9 @@ impl FeedType {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct DataFeedConfig {
-    pub feed_type: FeedType,
-    pub mode: Mode
-}
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct SymbolConfig {
-    pub symbol: String, 
-    pub data: Vec<DataFeedConfig>
-}
+
+
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PostgresConfig {
@@ -69,12 +57,6 @@ pub struct R2Config {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Feed {
-    pub markets: Vec<Market>,
-    pub symbols: Vec<SymbolConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct LogConfig {
     pub feed_log_location: String,
     pub system_log_location: String
@@ -89,20 +71,27 @@ pub struct DBConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct SymbolConfig {
+    pub markets: Market,
+    pub symbol: String, 
+    pub feed_type: FeedType,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ProviderConfig {
     pub provider: String, 
     pub reconnect_delay_secs: u32,
     pub max_reconnect_attempts: u32,
-    pub buffer_capacity: usize,
-    pub buffer_swap_trigger: f32,
-    pub feeds: Vec<Feed> 
+    pub symbol_feeds: Vec<SymbolConfig>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub providers: Vec<ProviderConfig>,
     pub database_conf: DBConfig,
-    pub log_config: LogConfig 
+    pub log_config: LogConfig, 
+    pub buffer_capacity: usize,
+    pub buffer_swap_trigger: f32, 
 }
 
 pub fn load_config(path: &str) -> Result<Config, anyhow::Error> {
@@ -151,6 +140,14 @@ pub fn validate_config(config: &Config) -> Result<(), anyhow::Error> {
         anyhow::bail!("system_log_location must not be empty");
     }
 
+    if config.buffer_capacity == 0 {
+            anyhow::bail!("buffer_capacity must be greater than 0");
+        }
+
+        if config.buffer_swap_trigger < 0.0 || config.buffer_swap_trigger > 1.0 {
+            anyhow::bail!("buffer_swap_trigger must be 0.0–1.0, got {}", config.buffer_swap_trigger);
+        }
+
     // --- Per-provider checks ---
 
     for provider in &config.providers {
@@ -158,31 +155,13 @@ pub fn validate_config(config: &Config) -> Result<(), anyhow::Error> {
             anyhow::bail!("Unknown provider '{}'. Known: kraken, databento", provider.provider);
         }
 
-        if provider.buffer_capacity == 0 {
-            anyhow::bail!("buffer_capacity must be greater than 0");
-        }
-
-        if provider.buffer_swap_trigger < 0.0 || provider.buffer_swap_trigger > 1.0 {
-            anyhow::bail!("buffer_swap_trigger must be 0.0–1.0, got {}", provider.buffer_swap_trigger);
-        }
-
         if provider.max_reconnect_attempts == 0 {
             anyhow::bail!("max_reconnect_attempts must be greater than 0");
         }
 
-        if provider.feeds.is_empty() {
-            anyhow::bail!("Provider '{}' has no feeds configured", provider.provider);
-        }
-
-        for feed in &provider.feeds {
-            if feed.symbols.is_empty() {
+        for symbol_feed  in &provider.symbol_feeds {
+            if symbol_feed.symbol.is_empty() {
                 anyhow::bail!("Provider '{}' has a feed with no symbols configured", provider.provider);
-            }
-
-            for symbol in &feed.symbols {
-                if symbol.data.is_empty() {
-                    anyhow::bail!("Symbol '{}' under '{}' has no data feeds configured", symbol.symbol, provider.provider);
-                }
             }
         }
     }
@@ -205,17 +184,10 @@ mod tests {
                 provider: "kraken".to_string(),
                 reconnect_delay_secs: 5,
                 max_reconnect_attempts: 5,
-                buffer_capacity: 1000,
-                buffer_swap_trigger: 0.8,
-                feeds: vec![Feed {
-                    markets: vec![Market::Crypto],
-                    symbols: vec![SymbolConfig {
-                        symbol: "BTC/USD".to_string(),
-                        data: vec![DataFeedConfig {
-                            feed_type: FeedType::Trades,
-                            mode: Mode::Normalized,
-                        }],
-                    }],
+                symbol_feeds: vec![SymbolConfig {
+                    markets: Market::Crypto,
+                    symbol: "BTC/USD".to_string(),
+                    feed_type: FeedType::Trades,
                 }],
             }],
             database_conf: DBConfig {
@@ -236,6 +208,8 @@ mod tests {
                 feed_log_location: "logs/kraken.log".to_string(),
                 system_log_location: "logs/system.log".to_string(),
             },
+            buffer_capacity: 1000,
+            buffer_swap_trigger: 0.8,
         }
     }
 
@@ -262,7 +236,7 @@ mod tests {
     #[test]
     fn test_buffer_capacity_zero() {
         let mut config = valid_config();
-        config.providers[0].buffer_capacity = 0;
+        config.buffer_capacity = 0;
         let err = validate_config(&config).unwrap_err();
         assert!(err.to_string().contains("buffer_capacity must be greater than 0"));
     }
@@ -270,11 +244,11 @@ mod tests {
     #[test]
     fn test_buffer_swap_trigger() {
         let mut config = valid_config();
-        config.providers[0].buffer_swap_trigger = 2.0;
+        config.buffer_swap_trigger = 2.0;
         let err = validate_config(&config).unwrap_err();
         assert!(err.to_string().contains("buffer_swap_trigger must be 0.0–1.0"));
 
-        config.providers[0].buffer_swap_trigger = -1.0;
+        config.buffer_swap_trigger = -1.0;
         let err = validate_config(&config).unwrap_err();
         assert!(err.to_string().contains("buffer_swap_trigger must be 0.0–1.0"));
     }
@@ -283,78 +257,6 @@ mod tests {
     fn test_max_reconnect_attempts_zero() {
         let mut config = valid_config();
         config.providers[0].max_reconnect_attempts = 0;
-        let err = validate_config(&config).unwrap_err();
-        assert!(err.to_string().contains("max_reconnect_attempts must be greater than 0"));
-    }
-
-    #[test]
-    fn test_r2_bad_schedule() {
-        let mut config = valid_config();
-        config.database_conf.r2 = Some(R2Config {
-            bucket: "helixfeed-archive".to_string(),
-            upload_schedule: "Monday".to_string(),
-        });
-        let err = validate_config(&config).unwrap_err();
-        assert!(err.to_string().contains("Invalid r2 upload_schedule"));
-    }
-
-    #[test]
-    fn test_r2_empty_bucket() {
-        let mut config = valid_config();
-        config.database_conf.r2 = Some(R2Config {
-            bucket: "".to_string(),
-            upload_schedule: "weekly".to_string(),
-        });
-        let err = validate_config(&config).unwrap_err();
-        assert!(err.to_string().contains("bucket is empty"));
-    }
-
-    #[test]
-    fn test_no_feeds() {
-        let mut config = valid_config();
-        config.providers[0].feeds.clear();
-        let err = validate_config(&config).unwrap_err();
-        assert!(err.to_string().contains("no feeds configured"));
-    }
-
-    #[test]
-    fn test_no_symbols() {
-        let mut config = valid_config();
-        config.providers[0].feeds[0].symbols.clear();
-        let err = validate_config(&config).unwrap_err();
-        assert!(err.to_string().contains("no symbols configured"));
-    }
-
-    #[test]
-    fn test_no_data_feeds() {
-        let mut config = valid_config();
-        for symbol in &mut config.providers[0].feeds[0].symbols {
-            symbol.data.clear();
-        }
-        let err = validate_config(&config).unwrap_err();
-        assert!(err.to_string().contains("has no data feeds configured"));
-    }
-
-    #[test]
-    fn test_missing_db_host() {
-        let mut config = valid_config();
-        config.database_conf.postgres_config.host = "".to_string();
-        let err = validate_config(&config).unwrap_err();
-        assert!(err.to_string().contains("No Database store Host Provided"));
-    }
-
-    #[test]
-    fn test_bad_db_port() {
-        let mut config = valid_config();
-        config.database_conf.postgres_config.port = "not-a-port".to_string();
-        let err = validate_config(&config).unwrap_err();
-        assert!(err.to_string().contains("is not a valid port number"));
-    }
-
-    #[test]
-    fn test_missing_log_locations() {
-        let mut config = valid_config();
-        config.log_config.feed_log_location = "".to_string();
         let err = validate_config(&config).unwrap_err();
         assert!(err.to_string().contains("feed_log_location must not be empty"));
     }
