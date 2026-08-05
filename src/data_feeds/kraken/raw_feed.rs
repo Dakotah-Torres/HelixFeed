@@ -4,6 +4,7 @@ use crate::data_feeds::kraken::feeds::trades::kraken_trade_data_feed;
 
 use crate::logging::feed_logger::FeedLogger;
 use crate::logging::feed_logger::LoggerContext;
+use crate::logging::LogType;
 
 use crate::config::FeedType;
 use crate::config::ProviderConfig; 
@@ -71,7 +72,7 @@ pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfi
                     if let Ok(Some(buff)) = swap_result {
                         if symbol_provider_channel_tx.send(buff).await.is_err() {
                             let mut log = log.lock().unwrap();
-                            log.log_error("Buffer was unable to send".to_string(), &log_ctx);
+                            log.feed_log(LogType::Error, "Buffer was unable to send", &log_ctx);
                             break;
                         }
                     }        

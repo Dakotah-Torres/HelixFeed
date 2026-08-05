@@ -5,6 +5,7 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use crate::logging::feed_logger::{FeedLogger, LoggerContext};
+use crate::logging::LogType;
 
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,8 +42,8 @@ pub struct KrakenTradeOuterRes<'a> {
 pub async fn kraken_trade_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext){
         {
             let mut log = logger.lock().unwrap();
-            log.log_started(&log_ctx);
-            log.log_info(format!("Trade Engine Starting: {}", symbols.join(", ")), &log_ctx);
+            log.feed_log(LogType::Info, "started", &log_ctx);
+            log.feed_log(LogType::Info, &format!("Trade Engine Starting: {}", symbols.join(", ")), &log_ctx);
         }
         let inner = KrakenTradeInnerReq {
             channel: CHANNEL_TRADES.to_string(),
@@ -72,7 +73,7 @@ pub async fn kraken_trade_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
                 
                 if tx.send(msg).await.is_err() {
                     let mut log = logger.lock().unwrap();
-                    log.log_error("Trades: receiver dropped, shutting down".to_string(), &log_ctx);
+                    log.feed_log(LogType::Error, "Trades: receiver dropped, shutting down", &log_ctx);
                     break;
                 }
             }

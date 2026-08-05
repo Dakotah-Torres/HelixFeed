@@ -1,7 +1,8 @@
 
 use std::sync::{ Mutex};
-use crate::logging::feed_logger::FeedLogger; 
+use crate::logging::feed_logger::FeedLogger;
 use crate::logging::feed_logger::LoggerContext;
+use crate::logging::LogType;
 use crate::config::FeedType;
 use crate::config::SymbolConfig;
 
@@ -102,7 +103,7 @@ impl DoubleBuffer {
     }
 
     pub fn buffer_push_and_swap(&self, message: String, provider_name: String, symbol_conf: SymbolConfig,  logger: &mut FeedLogger, ctx: &LoggerContext) -> Result<Option<DataBuffer>, anyhow::Error> {
-        logger.log_info("Initiating Push To Buffer".to_string(), ctx);
+        logger.feed_log(LogType::Info, "Initiating Push To Buffer", ctx);
         
         let mut buffer = self.inner_store.lock().unwrap();
         let inner_store: &mut DataStore = &mut *buffer;
@@ -112,7 +113,7 @@ impl DoubleBuffer {
         inner_store.active.set_provider(provider_name);
 
         if inner_store.active.trigger_swap() {
-            logger.log_info(format!("Buffer Trigger Limit Reached "), ctx);
+            logger.feed_log(LogType::Info, "Buffer Trigger Limit Reached", ctx);
             std::mem::swap(&mut inner_store.active, &mut inner_store.standby);
 
             let capacity = inner_store.standby.capacity;

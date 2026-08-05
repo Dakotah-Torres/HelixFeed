@@ -1,20 +1,21 @@
 use crate::config::FeedType;
-use std::fs::{File, OpenOptions}; 
+use crate::logging::LogType;
+use std::fs::{File, OpenOptions};
 use std::io::BufWriter;
 use std::io::Write;
 use chrono::Local;
 
 
 pub struct FeedLogger {
-    pub log_path: String, 
-    pub provider: String,  
+    pub log_path: String,
+    pub provider: String,
     writer: BufWriter<File>
 }
 
 #[derive(Clone)]
 pub struct LoggerContext {
-    pub symbol: String, 
-    pub feed_type: FeedType, 
+    pub symbol: String,
+    pub feed_type: FeedType,
 }
 
 impl LoggerContext {
@@ -28,10 +29,10 @@ impl FeedLogger {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&log_path)?; 
+            .open(&log_path)?;
 
-        let writer = BufWriter::new(file); 
-    
+        let writer = BufWriter::new(file);
+
         Ok(FeedLogger {
             log_path,
             provider,
@@ -39,111 +40,24 @@ impl FeedLogger {
         })
     }
 
-    pub fn log_started(&mut self , ctx: &LoggerContext) {
+    pub fn feed_log(&mut self, log_type: LogType, message: &str, ctx: &LoggerContext) {
+        let label = match log_type {
+            LogType::Debug => "DEBUG",
+            LogType::Error => "ERROR",
+            LogType::Info => "INFO",
+            LogType::Warn => "WARN"
+        };
+
         let line = format!(
-            "[{}] [INFO] {} | {} | {:?}  | started\n", 
+            "[{}] [{}] | {} | {} | {:?} | {}\n",
             Local::now().format("%Y-%m-%d %H:%M:%S"),
-            self.provider, 
-            ctx.symbol,
-            ctx.feed_type, 
-            
-        ); 
-
-        let _ = self.writer.write_all(line.as_bytes());
-    }
-
-    pub fn log_stopped(&mut self , ctx: &LoggerContext) {
-        let line = format!(
-            "[{}] [INFO] {} | {} | {:?}  | stopped\n", 
-            Local::now().format("%Y-%m-%d %H:%M:%S"),
-            self.provider, 
-            ctx.symbol,
-            ctx.feed_type, 
-            
-        ); 
-
-        let _ = self.writer.write_all(line.as_bytes());
-
-    }
-
-    pub fn log_error(&mut self, reason: String , ctx: &LoggerContext) {
-        let line = format!(
-            "[{}] [ERROR] {} | {} | {:?}  | {}\n", 
-            Local::now().format("%Y-%m-%d %H:%M:%S"),
-            self.provider, 
-            ctx.symbol,
-            ctx.feed_type, 
-            
-            reason
-        ); 
-
-        let _ = self.writer.write_all(line.as_bytes());
-    }
-
-    pub fn log_info(&mut self, info: String , ctx: &LoggerContext) {
-        let line = format!(
-            "[{}] [INFO] {} | {} | {:?}  | {}\n", 
-            Local::now().format("%Y-%m-%d %H:%M:%S"),
-            self.provider, 
-            ctx.symbol,
-            ctx.feed_type, 
-            
-            info,
-        ); 
-
-        let _ = self.writer.write_all(line.as_bytes());
-    }
-    
-    pub fn log_success(&mut self, success_msg: String , ctx: &LoggerContext) {
-        let line = format!(
-            "[{}] [INFO] {} | {} | {:?} | {}\n", 
-            Local::now().format("%Y-%m-%d %H:%M:%S"),
-            self.provider, 
-            ctx.symbol,
-            ctx.feed_type, 
-            
-            success_msg,
-        ); 
-
-        let _ = self.writer.write_all(line.as_bytes());
-    }
-
-    pub fn log_reconnecting(&mut self, attempt: u32, max: u32  , ctx: &LoggerContext) {
-        let line = format!(
-            "[{}] [WARN] {} | {} | {:?}  | reconnecting attempt {}/{}\n", 
-            Local::now().format("%Y-%m-%d %H:%M:%S"),
-            self.provider, 
+            label,
+            self.provider,
             ctx.symbol,
             ctx.feed_type,
-            
-            attempt, 
-            max
-        ); 
-        let _ = self.writer.write_all(line.as_bytes());
-    }
-
-    pub fn log_reconnected(&mut self , ctx: &LoggerContext) {
-        let line = format!(
-            "[{}] [WARN] {} | {} | {:?}  | reconnected\n", 
-            Local::now().format("%Y-%m-%d %H:%M:%S"),
-            self.provider, 
-            ctx.symbol,
-            ctx.feed_type,
-            
+            message
         );
+
         let _ = self.writer.write_all(line.as_bytes());
     }
-
-    pub fn log_reconnect_failed(&mut self , ctx: &LoggerContext) {
-        let line = format!(
-            "[{}] [WARN] {} | {} | {:?}  | reconnect failed\n", 
-            Local::now().format("%Y-%m-%d %H:%M:%S"),
-            self.provider, 
-            ctx.symbol,
-            ctx.feed_type,
-            
-        ); 
-        let _ = self.writer.write_all(line.as_bytes());
-    }
-
 }
