@@ -2,7 +2,7 @@ use duckdb::Connection;
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH}; 
 use crate::logging::sys_logger::SysLogger;
-use crate::logging::sys_logger::LogType;
+use crate::logging::LogType;
 
 const LOG_PATH: &str  = "logs/sys_logs.log";
 const SYSTEM: &str = "DuckDB Migrations";

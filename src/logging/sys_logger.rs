@@ -1,15 +1,8 @@
-use std::fs::{File, OpenOptions}; 
+use std::fs::{File, OpenOptions};
 use std::io::BufWriter;
 use std::io::Write;
 use chrono::Local;
-
-
-pub enum LogType {
-    Debug,
-    Error, 
-    Info,
-    Warn
-}
+use crate::logging::LogType;
 
 pub struct SysLogger {
     pub log_path: String, 

@@ -5,6 +5,7 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use crate::data_feeds::kraken::connection::connector::{KRAKEN_AUTH_URL, CHANNEL_ORDERS_L3, kraken_connect};
 use std::sync::{Arc, Mutex};
 use crate::logging::feed_logger::{FeedLogger, LoggerContext};
+use crate::logging::LogType;
 use sha2::{Sha256, Digest};
 use hex; 
 
@@ -83,10 +84,10 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
         .expect("KRAKEN_API_SECRET not set in .env");
     {
         let mut log = logger.lock().unwrap();
-        log.log_started(&log_ctx);
-        log.log_info(format!("Order Engine Starting: {}", symbols.join(", ")), &log_ctx);
+        log.feed_log(LogType::Info, "started", &log_ctx);
+        log.feed_log(LogType::Info, &format!("Order Engine Starting: {}", symbols.join(", ")), &log_ctx);
         let api_hash = hash_string(&api_key);
-        log.log_info(format!("API CONNECTED | CONFIRMATION KEY: {}", api_hash), &log_ctx);
+        log.feed_log(LogType::Info, &format!("API CONNECTED | CONFIRMATION KEY: {}", api_hash), &log_ctx);
     }
     
     
@@ -112,7 +113,7 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
         if let Ok(Message::Text(msg)) = message {
             if tx.send(msg).await.is_err() {
                 let mut log = logger.lock().unwrap();
-                log.log_error("Orders: receiver dropped, shutting down".to_string(), &log_ctx);
+                log.feed_log(LogType::Error, "Orders: receiver dropped, shutting down", &log_ctx);
                 break;
             }
         }

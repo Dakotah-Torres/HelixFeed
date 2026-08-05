@@ -4,7 +4,8 @@ use serde::{Serialize, Deserialize};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use crate::data_feeds::kraken::connection::connector::{KRAKEN_PUB_URL, CHANNEL_BOOK_L2, kraken_connect};
 use std::sync::{Arc, Mutex};
-use crate::logging::feed_logger::{FeedLogger, LoggerContext}; 
+use crate::logging::feed_logger::{FeedLogger, LoggerContext};
+use crate::logging::LogType;
 
 use tokio::sync::mpsc; 
 
@@ -69,7 +70,7 @@ pub async fn kraken_book_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String
 
     {
         let mut log = logger.lock().unwrap();
-        log.log_info(format!("Book Engine Starting: {}", symbols.join(", ")), &log_ctx);
+        log.feed_log(LogType::Info, &format!("Book Engine Starting: {}", symbols.join(", ")), &log_ctx);
     }
     let inner = KrakenBookReqInner {
         channel: CHANNEL_BOOK_L2.to_string(),
@@ -91,7 +92,7 @@ pub async fn kraken_book_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String
         if let Ok(Message::Text(msg)) = message {
             if tx.send(msg).await.is_ok(){
                 let mut log = logger.lock().unwrap();
-                log.log_error("Book: receiver dropped, shutting down".to_string(), &log_ctx);
+                log.feed_log(LogType::Error, "Book: receiver dropped, shutting down", &log_ctx);
             
             } 
         }

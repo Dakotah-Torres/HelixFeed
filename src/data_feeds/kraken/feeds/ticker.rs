@@ -6,8 +6,9 @@ use tokio::sync::mpsc;
 
 use crate::data_feeds::kraken::connection::connector::{KRAKEN_PUB_URL, CHANNEL_TICKER_L1, kraken_connect};
 use std::sync::{Arc, Mutex};
-use crate::logging::feed_logger::FeedLogger; 
-use crate::logging::feed_logger::LoggerContext; 
+use crate::logging::feed_logger::FeedLogger;
+use crate::logging::feed_logger::LoggerContext;
+use crate::logging::LogType;
 
 
 
@@ -57,8 +58,8 @@ pub struct KrakenTickerResOuter<'a> {
 pub async fn kraken_ticker_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext){
         {
             let mut log = logger.lock().unwrap();
-            log.log_started(&log_ctx);
-            log.log_info(format!("Ticker Engine Starting: {}", symbols.join(", ")), &log_ctx);
+            log.feed_log(LogType::Info, "started", &log_ctx);
+            log.feed_log(LogType::Info, &format!("Ticker Engine Starting: {}", symbols.join(", ")), &log_ctx);
         }
         
         let inner = KrakenTickerReqInner {
@@ -80,7 +81,7 @@ pub async fn kraken_ticker_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Stri
             if let Ok(Message::Text(msg)) = message {
                 if tx.send(msg).await.is_err() {
                     let mut log = logger.lock().unwrap();
-                    log.log_error("Ticker: receiver dropped, shutting down".to_string(), &log_ctx);
+                    log.feed_log(LogType::Error, "Ticker: receiver dropped, shutting down", &log_ctx);
                     break;
                 }
             }
