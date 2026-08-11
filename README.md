@@ -116,8 +116,8 @@ cd HelixFeed
 Create a `.env` file in the project root with:
 
 ```
-DB_USER=helixfeed
-DB_PASS=devpassword
+DB_USER=YOUR_DATABASE_USER_NAME
+DB_PASS=YOUR_DATABASE_PASSWORD
 KRAKEN_API_KEY=<your-key>
 KRAKEN_API_SECRET=<your-secret>
 ```
