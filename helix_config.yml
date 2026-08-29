@@ -17,7 +17,6 @@ database_conf:
     database: helixfeed_dev
     user: "helixfeed"
     password: "devpassword"
-  duckdb_location: "/db/kraken.duckdb"
   # r2 omitted entirely — it's Option<R2Config> with #[serde(default)], so leaving it out is valid
 
 log_config:

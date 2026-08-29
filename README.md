@@ -2,7 +2,7 @@
 
 🚧 **Active Development** — this is a personal, self-hosted project I'm building and iterating on regularly. 
 
-A Rust market data ingestion engine that connects to exchange WebSocket feeds, buffers incoming messages, and persists raw and normalized data to PostgreSQL and DuckDB — built as the data backbone for a personal quantitative trading research stack.
+A Rust market data ingestion engine that connects to exchange WebSocket feeds, buffers incoming messages, and persists raw data to PostgreSQL — built as the data backbone for a personal quantitative trading research stack.
 
 HelixFeed is the ingestion layer for a larger system: it captures raw tick/trade/book data from exchanges, stores it durably, and hands off normalized data for downstream analysis (indicator calculation, backtesting) via a companion Rust crate, `qasm_core`.
 
@@ -12,7 +12,7 @@ HelixFeed is the ingestion layer for a larger system: it captures raw tick/trade
 
 - **Connects** to exchange WebSocket APIs (currently Kraken v2) and subscribes to trade, book, ticker, and order feeds per symbol.
 - **Buffers** incoming messages in memory using a double-buffer pattern, swapping and flushing to the database once a configurable capacity threshold is hit — so writes are batched instead of hitting Postgres per message.
-- **Persists** raw JSON payloads to PostgreSQL (`raw_financial_data`) for durability and replay, with a DuckDB layer for normalized, query-friendly analytics data.
+- **Persists** raw JSON payloads to PostgreSQL (`raw_financial_data`) for durability and replay.
 - **Exposes** Prometheus metrics (feeds running, messages received, buffer swaps, reconnect attempts, feed up/down) over an embedded HTTP server for observability.
 - **Runs** every symbol/feed-type combination as its own isolated Tokio task, so one feed erroring or reconnecting doesn't take down the others.
 
@@ -54,12 +54,6 @@ HelixFeed is the ingestion layer for a larger system: it captures raw tick/trade
                      │   PostgresDBRaw       │
                      │ batched UNNEST insert │
                      │→ raw_financial_data   │
-                     └──────────┬──────────┘
-                                │
-                     ┌──────────▼──────────┐
-                     │   NormalizedDuckDB    │
-                     │ (normalized analytics │
-                     │  tables, e.g. trades)  │
                      └────────────────────────┘
 
 Prometheus metrics server runs alongside, scraping feed/task health.
@@ -74,12 +68,10 @@ Prometheus metrics server runs alongside, scraping feed/task health.
 - [x] Batched raw data inserts into PostgreSQL via `sqlx`, with schema migrations
 - [x] Config loading + validation (`helix_config.yml`) with unit test coverage
 - [x] Prometheus metrics server (feed health, message counts, reconnects, buffer swaps)
-- [x] DuckDB migration runner for normalized analytics tables
 - [x] Self-hosted CI: `cargo build --release` on push to `main`
 
 **In progress / scaffolded**
 - [ ] Order feed (`level3`) — defined in config/traits but not yet wired into the Kraken raw feed dispatcher
-- [ ] Raw → normalized pipeline (Postgres → DuckDB) — DuckDB schema exists (`trades_normalized`) but the transform/load step isn't implemented yet
 - [ ] Reconnect/backoff logic — config supports `reconnect_delay_secs` / `max_reconnect_attempts`, connector-level retry handling still in progress
 - [ ] Additional providers — config validates against `kraken` and `databento`, only Kraken is implemented
 - [ ] R2 cold-storage archival (config schema exists, upload logic not yet built)
@@ -89,7 +81,7 @@ Prometheus metrics server runs alongside, scraping feed/task health.
 - **Language:** Rust (2021 edition)
 - **Async runtime:** Tokio
 - **WebSocket client:** `tokio-tungstenite`
-- **Databases:** PostgreSQL (`sqlx`, raw storage + migrations), DuckDB (normalized analytics, embedded via `include_str!` migrations)
+- **Databases:** PostgreSQL (`sqlx`, raw storage + migrations)
 - **Metrics:** `prometheus` + `hyper` (embedded metrics HTTP server)
 - **Config:** YAML (`serde_yaml`) with custom validation layer
 - **Auth:** HMAC-SHA512 request signing for Kraken's authenticated WebSocket token endpoint
@@ -156,12 +148,10 @@ HelixFeed/
 │   │   └── kraken/
 │   │       ├── connection/connector.rs # WebSocket connect + Kraken auth (HMAC signing)
 │   │       ├── raw_feed.rs             # Per-symbol task spawning + buffer wiring
-│   │       └── feeds/                  # trades.rs, book.rs, ticker.rs, orders.rs, candle.rs
+│   │       └── feeds/                  # trades.rs, book.rs, ticker.rs, orders.rs
 │   ├── db/
 │   │   ├── buffer.rs                   # DoubleBuffer — active/standby swap on capacity
-│   │   ├── postgresql.rs               # PgPool, batched raw inserts, migrations
-│   │   ├── duckdb.rs                   # DuckDB connection + migration runner
-│   │   └── duckdb_migrations/          # Embedded (include_str!) normalized schema
+│   │   └── postgresql.rs               # PgPool, batched raw inserts, migrations
 │   ├── metrics/prometheus.rs           # Prometheus registry + embedded metrics server
 │   ├── logging/                        # Feed-level and system-level logging
 │   └── ingest/                         # Ingestion pipeline glue
@@ -176,14 +166,11 @@ HelixFeed/
 A few architecture decisions worth calling out:
 
 - **Raw storage schema evolved from per-feed-type tables (`trades_raw`, `book_raw`) to a single unified `raw_financial_data` table** — simpler to insert into via one batched `UNNEST` query, and feed type becomes a column rather than a table name.
-- **Postgres holds raw data; DuckDB holds normalized analytics data.** This keeps ingestion fast and durable (append raw JSON, no transform on the hot path) while giving downstream analysis a fast, typed, query-friendly store.
-- **DuckDB migrations are embedded at compile time (`include_str!`)** rather than read from disk, for single-binary distribution. Per-feed normalized tables are provisioned dynamically in Rust rather than tracked as migrations, since their shape depends on the feed being ingested.
 - **Every symbol × feed-type combination gets its own Tokio task and its own `DoubleBuffer`**, so a slow or failing feed for one symbol doesn't block others, and buffer swap thresholds can be tuned per feed volume.
 
 ## Roadmap
 
 - Wire up the order book (L3) feed end-to-end
-- Build the raw → normalized transform pipeline into DuckDB
 - Add reconnect/backoff handling at the connector level
 - Add a second data provider (Databento is already validated in config)
 - R2 cold-storage archival for raw data

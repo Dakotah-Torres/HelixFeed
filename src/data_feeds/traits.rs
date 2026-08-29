@@ -7,7 +7,6 @@ use std::future::Future;
 
 use qasm_core::core_types::trade::TradeData;
 use qasm_core::core_types::book::BookData;
-use qasm_core::core_types::candle::Candle;
 
 
 pub enum ReplayLevel {
@@ -28,7 +27,6 @@ pub enum Resolution {
 pub enum NormalizedMessage {
     Trade(TradeData),
     Book(BookData),
-    Candle(Candle)
 }
 
 pub struct ReplayCapability {
@@ -81,14 +79,4 @@ pub trait OrdersFeed {
     ) -> impl Future<Output = ()>;
 
     fn orders_normalized_feed(&self, raw: String) -> NormalizedMessage;
-}
-
-pub trait CandleFeed {
-    
-    fn candle_raw_feed(&self,
-        symbols: Vec<String>,
-        tx: mpsc::Sender<String>
-    ) -> impl Future<Output = ()>;
-
-    fn candle_normalized_feed(&self, raw: String) -> NormalizedMessage;
 }

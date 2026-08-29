@@ -18,9 +18,8 @@ pub enum Market {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FeedType {
-    Trades, 
+    Trades,
     Book,
-    Candles, 
     Orders,
     Ticks
 }
@@ -30,7 +29,6 @@ impl FeedType {
         match self {
             FeedType::Trades => "trades",
             FeedType::Book => "book",
-            FeedType::Candles => "candles",
             FeedType::Orders => "orders",
             FeedType::Ticks => "ticks",
         }
@@ -65,7 +63,6 @@ pub struct LogConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct DBConfig {
     pub postgres_config: PostgresConfig,
-    pub duckdb_location: String,
     #[serde(default)]
     pub r2: Option<R2Config>,
 }
@@ -198,7 +195,6 @@ mod tests {
                     user: db_user,
                     password: db_pass,
                 },
-                duckdb_location: "/db/kraken.duckdb".to_string(),
                 r2: Some(R2Config {
                     bucket: "helixfeed-archive".to_string(),
                     upload_schedule: "weekly".to_string(),

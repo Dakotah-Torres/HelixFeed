@@ -2,7 +2,6 @@ pub mod book;
 pub mod orders;
 pub mod ticker;
 pub mod trades;
-pub mod candle;
 
 use lazy_static::lazy_static; 
 use std::sync::Mutex;
