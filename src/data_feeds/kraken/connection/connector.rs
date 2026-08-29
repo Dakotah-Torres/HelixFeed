@@ -32,24 +32,20 @@ pub const CHANNEL_ORDERS_L3: &str = "level3";
 pub const CHANNEL_TRADES: &str = "trade";
 
 
-pub async fn kraken_connect<T: Serialize>(connection_request: T, _url:&str) -> KrakenReadStream {
+pub async fn kraken_connect<T: Serialize>(connection_request: T, _url:&str) -> Result<KrakenReadStream, anyhow::Error> {
 
     let url = Url::parse(_url).expect("Invalid URL");
     
     let(ws_stream, _) = connect_async(url.to_string())
-        .await
-        .expect("Failed to Connect");
+        .await?;
 
     let (mut write, read) = ws_stream.split();
-    let conn_req_json = serde_json::to_string(&connection_request)
-        .expect("Failed to serialize request");
+    let conn_req_json = serde_json::to_string(&connection_request)?;
 
-    write.send(Message::Text(conn_req_json))
-        .await
-        .expect("Unable to Connect");
+    write.send(Message::Text(conn_req_json)).await?;
 
     //returning the read stream
-    read
+    Ok(read)
 
 }
 
