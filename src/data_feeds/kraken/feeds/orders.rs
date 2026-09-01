@@ -40,7 +40,7 @@ impl From<OrderDepth> for u32 {
 
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct KrakenOrdersReqInnerParams {
     channel: String,
     symbol: Vec<String>, 
@@ -49,7 +49,7 @@ pub struct KrakenOrdersReqInnerParams {
     token: String
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct KrakenOrdersReqOuter {
     method: String,
     params: KrakenOrdersReqInnerParams,
@@ -79,7 +79,7 @@ pub struct KrakenOrderResObject<'a> {
 }
 
 
-pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext){
+pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext, reconnect_delay_secs: u32, max_reconnect_attempts: u32){
     let api_key = env::var("KRAKEN_WEB_SOCKET_KEY")
         .expect("KRAKEN_API_SECRET not set in .env");
     {
@@ -89,6 +89,8 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
         let api_hash = hash_string(&api_key);
         log.feed_log(LogType::Info, &format!("API CONNECTED | CONFIRMATION KEY: {}", api_hash), &log_ctx);
     }
+
+    let mut attempts = 0;
     
     
     let params = KrakenOrdersReqInnerParams {
@@ -105,19 +107,40 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
         params: params,
         req_id: 1234
     };
+    loop {
+        let mut stream  = match kraken_connect(order_request.clone(), KRAKEN_AUTH_URL).await{
+            Ok(stream) => {
+                attempts = 0;
+                stream
+            }
 
-    let mut stream  = kraken_connect(order_request, KRAKEN_AUTH_URL)
-        .await;
+            Err(e) => {
+                attempts +=1; 
+                {
+                    let mut log = logger.lock().unwrap();
+                    log.feed_log(LogType::Error, &format!("Kraken Order Connection Failed - Below Error:\n {} \n Attempting to reconnect {} out of {} attempts", e, attempts, max_reconnect_attempts), &log_ctx);
+                    if attempts >= max_reconnect_attempts{
+                        log.feed_log(LogType::Error, &format!("Kraken Order Connection Failed - Below Error:\n {} \n Max Attemtps reached Ending Connection", e), &log_ctx);
+                        return
+                    }
+                }
 
-    while let Some(message) = stream.next().await {
-        if let Ok(Message::Text(msg)) = message {
-            if tx.send(msg).await.is_err() {
-                let mut log = logger.lock().unwrap();
-                log.feed_log(LogType::Error, "Orders: receiver dropped, shutting down", &log_ctx);
-                break;
+                tokio::time::sleep(std::time::Duration::from_secs(reconnect_delay_secs as u64)).await; 
+                continue;
+                
+            }
+        };
+        
+        while let Some(message) = stream.next().await {
+            if let Ok(Message::Text(msg)) = message {
+                if tx.send(msg).await.is_err() {
+                    let mut log = logger.lock().unwrap();
+                    log.feed_log(LogType::Error, "Orders: receiver dropped, shutting down", &log_ctx);
+                    break;
+                }
             }
         }
-    }
+    };   
 }
 
 

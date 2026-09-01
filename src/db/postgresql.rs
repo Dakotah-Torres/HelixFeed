@@ -170,9 +170,9 @@ mod test {
             RawRow {
                 received: Utc::now(),
                 data_provider: "kraken".to_string(),
-                data_type: FeedType::Ticks,
+                data_type: FeedType::Orders,
                 symbol: test_symbol.to_string(),
-                raw_json: serde_json::json!({ "tick": 42 }),
+                raw_json: serde_json::json!({ "order_id": 42 }),
             },
         ];
         

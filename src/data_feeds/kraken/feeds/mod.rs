@@ -1,6 +1,5 @@
 pub mod book;
 pub mod orders;
-pub mod ticker;
 pub mod trades;
 
 use lazy_static::lazy_static; 

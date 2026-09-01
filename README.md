@@ -10,7 +10,7 @@ HelixFeed is the ingestion layer for a larger system: it captures raw tick/trade
 
 ## Overview
 
-- **Connects** to exchange WebSocket APIs (currently Kraken v2) and subscribes to trade, book, ticker, and order feeds per symbol.
+- **Connects** to exchange WebSocket APIs (currently Kraken v2) and subscribes to trade, book, and order feeds per symbol.
 - **Buffers** incoming messages in memory using a double-buffer pattern, swapping and flushing to the database once a configurable capacity threshold is hit — so writes are batched instead of hitting Postgres per message.
 - **Persists** raw JSON payloads to PostgreSQL (`raw_financial_data`) for durability and replay.
 - **Exposes** Prometheus metrics (feeds running, messages received, buffer swaps, reconnect attempts, feed up/down) over an embedded HTTP server for observability.
@@ -36,7 +36,7 @@ HelixFeed is the ingestion layer for a larger system: it captures raw tick/trade
         ┌───────────────────────┼───────────────────────┐
         │                       │                       │
 ┌───────▼────────┐    ┌─────────▼────────┐    ┌─────────▼────────┐
-│ Kraken: Trades  │    │  Kraken: Book     │    │ Kraken: Ticker    │
+│ Kraken: Trades  │    │  Kraken: Book     │    │ Kraken: Orders    │
 │ (Tokio task per │    │ (Tokio task per   │    │ (Tokio task per   │
 │    symbol)      │    │    symbol)        │    │    symbol)        │
 └───────┬────────┘    └─────────┬────────┘    └─────────┬────────┘
@@ -62,7 +62,7 @@ Prometheus metrics server runs alongside, scraping feed/task health.
 ## Current Status
 
 **Working**
-- [x] Kraken WebSocket connector (public + authenticated token flow) for trades, book, and ticker feeds
+- [x] Kraken WebSocket connector (public + authenticated token flow) for trades, book, and order feeds
 - [x] Per-symbol, per-feed-type Tokio tasks with isolated channels
 - [x] `DoubleBuffer` active/standby swap with configurable capacity + fill-trigger
 - [x] Batched raw data inserts into PostgreSQL via `sqlx`, with schema migrations
@@ -148,7 +148,7 @@ HelixFeed/
 │   │   └── kraken/
 │   │       ├── connection/connector.rs # WebSocket connect + Kraken auth (HMAC signing)
 │   │       ├── raw_feed.rs             # Per-symbol task spawning + buffer wiring
-│   │       └── feeds/                  # trades.rs, book.rs, ticker.rs, orders.rs
+│   │       └── feeds/                  # trades.rs, book.rs, orders.rs
 │   ├── db/
 │   │   ├── buffer.rs                   # DoubleBuffer — active/standby swap on capacity
 │   │   └── postgresql.rs               # PgPool, batched raw inserts, migrations

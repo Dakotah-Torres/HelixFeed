@@ -21,7 +21,6 @@ pub enum FeedType {
     Trades,
     Book,
     Orders,
-    Ticks
 }
 
 impl FeedType {
@@ -30,7 +29,6 @@ impl FeedType {
             FeedType::Trades => "trades",
             FeedType::Book => "book",
             FeedType::Orders => "orders",
-            FeedType::Ticks => "ticks",
         }
     }
 }

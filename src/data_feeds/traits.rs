@@ -5,9 +5,6 @@ use crate::config::FeedType;
 use tokio::sync::mpsc;
 use std::future::Future;
 
-use qasm_core::core_types::trade::TradeData;
-use qasm_core::core_types::book::BookData;
-
 
 pub enum ReplayLevel {
     None, 
@@ -24,10 +21,7 @@ pub enum Resolution {
     Millisecond, 
     Microsecond,
 }
-pub enum NormalizedMessage {
-    Trade(TradeData),
-    Book(BookData),
-}
+pub enum NormalizedMessage {}
 
 pub struct ReplayCapability {
     pub level: ReplayLevel,

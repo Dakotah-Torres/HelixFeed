@@ -18,7 +18,6 @@ base64 = "0.22.1"
 anyhow = "1"
 serde_urlencoded = "0.7"
 bincode = "1.3"
-qasm_core = { path = "../qasm_core" }
 serde_yaml = "0.9.34"
 simd-json = "0.17.0"
 chrono = "0.4.45"

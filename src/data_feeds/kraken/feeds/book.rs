@@ -31,14 +31,14 @@ impl From<BookDepth> for u32 {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct KrakenBookReqInner {
     channel: String,
     symbol: Vec<String>,
     depth: BookDepth,
     snapshot: bool,
 } 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct KrakenBookReqOuter {
     method: String,
     params: KrakenBookReqInner,
@@ -66,7 +66,7 @@ pub struct KrakenBookResOuter <'a>{
     data: Vec<KrakenBookObject<'a>>
 }
 
-pub async fn kraken_book_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext) {
+pub async fn kraken_book_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext , reconnect_delay_secs:  u32, max_reconnect_attempts: u32) {
 
     {
         let mut log = logger.lock().unwrap();
@@ -84,18 +84,41 @@ pub async fn kraken_book_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String
         req_id: 1234
     };
 
-    let mut stream = kraken_connect(outer, KRAKEN_PUB_URL)
-        .await;
+    let mut attempts = 0; 
+    loop {
+        let mut stream = match kraken_connect(outer.clone(), KRAKEN_PUB_URL).await{
+            Ok(stream) => {
+                attempts = 0;
+                stream
+            }
+
+            Err(e) => {
+                attempts +=1; 
+                {
+                    let mut log = logger.lock().unwrap();
+                    log.feed_log(LogType::Error, &format!("Kraken Book Connection Failed - Below Error:\n {} \n Attempting to reconnect {} out of {} attempts", e, attempts, max_reconnect_attempts), &log_ctx);
+                    if attempts >= max_reconnect_attempts{
+                        log.feed_log(LogType::Error, &format!("Kraken Book Connection Failed - Below Error:\n {} \n Max Attemtps reached Ending Connection", e), &log_ctx);
+                        return
+                    }
+                }
+
+                tokio::time::sleep(std::time::Duration::from_secs(reconnect_delay_secs as u64)).await; 
+                continue;
+                
+            }
+        };
 
     
-    while let Some(message) = stream.next().await {
-        if let Ok(Message::Text(msg)) = message {
-            if tx.send(msg).await.is_ok(){
-                let mut log = logger.lock().unwrap();
-                log.feed_log(LogType::Error, "Book: receiver dropped, shutting down", &log_ctx);
-            
-            } 
-        }
+        while let Some(message) = stream.next().await {
+            if let Ok(Message::Text(msg)) = message {
+                if tx.send(msg).await.is_ok(){
+                    let mut log = logger.lock().unwrap();
+                    log.feed_log(LogType::Error, "Book: receiver dropped, shutting down", &log_ctx);
+                
+                } 
+            }
 
-    }
+        }
+    };
 }

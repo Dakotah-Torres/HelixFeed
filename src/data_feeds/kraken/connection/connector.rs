@@ -27,14 +27,13 @@ pub type KrakenReadStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream
 pub const KRAKEN_PUB_URL: &str = "wss://ws.kraken.com/v2";
 pub const KRAKEN_AUTH_URL: &str = "wss://ws-l3.kraken.com/v2";
 pub const CHANNEL_BOOK_L2: &str = "book";
-pub const CHANNEL_TICKER_L1: &str = "ticker";
 pub const CHANNEL_ORDERS_L3: &str = "level3";
 pub const CHANNEL_TRADES: &str = "trade";
 
 
 pub async fn kraken_connect<T: Serialize>(connection_request: T, _url:&str) -> Result<KrakenReadStream, anyhow::Error> {
 
-    let url = Url::parse(_url).expect("Invalid URL");
+    let url = Url::parse(_url)?;
     
     let(ws_stream, _) = connect_async(url.to_string())
         .await?;
@@ -118,7 +117,6 @@ impl DataProvider for KrakenConnector {
             FeedType::Trades,
             FeedType::Book,
             FeedType::Orders,
-            FeedType::Ticks,
         ];
         feeds
     }

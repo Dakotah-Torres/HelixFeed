@@ -1,5 +1,5 @@
-use crate::data_feeds::kraken::feeds::book::kraken_book_data_feed; 
-use crate::data_feeds::kraken::feeds::ticker::kraken_ticker_data_feed;
+use crate::data_feeds::kraken::feeds::book::kraken_book_data_feed;
+use crate::data_feeds::kraken::feeds::orders::kraken_order_data_feed;
 use crate::data_feeds::kraken::feeds::trades::kraken_trade_data_feed;
 
 use crate::logging::feed_logger::FeedLogger;
@@ -39,25 +39,23 @@ pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfi
                 let log = Arc::clone(&log);
                 let log_ctx = log_ctx.clone();
                 tokio::spawn(async move {
-                    kraken_trade_data_feed(symbols, tx_feed, log, log_ctx).await;
+                    kraken_trade_data_feed(symbols, tx_feed, log, log_ctx, provider_conf.reconnect_delay_secs, provider_conf.max_reconnect_attempts).await;
                 }); 
             }
             FeedType::Book => {
                 let log = Arc::clone(&log);
                 let log_ctx = log_ctx.clone();
                 tokio::spawn(async move {
-                    kraken_book_data_feed(symbols, tx_feed, log, log_ctx).await;
+                    kraken_book_data_feed(symbols, tx_feed, log, log_ctx, provider_conf.reconnect_delay_secs, provider_conf.max_reconnect_attempts).await;
                 }); 
             }
-            FeedType::Ticks => {
+            FeedType::Orders => {
                 let log = Arc::clone(&log);
                 let log_ctx = log_ctx.clone();
                 tokio::spawn(async move {
-                    kraken_ticker_data_feed(symbols, tx_feed, log, log_ctx).await;
-                }); 
+                    kraken_order_data_feed(symbols, tx_feed, log, log_ctx, provider_conf.reconnect_delay_secs, provider_conf.max_reconnect_attempts).await;
+                });
             }
-            
-            _ => {}
 
         }
 
