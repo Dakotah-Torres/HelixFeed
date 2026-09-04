@@ -4,6 +4,7 @@ use crate::data_feeds::kraken::feeds::trades::kraken_trade_data_feed;
 
 use crate::logging::feed_logger::FeedLogger;
 use crate::logging::feed_logger::LoggerContext;
+use crate::logging::sys_logger::SysLogger;
 use crate::logging::LogType;
 
 use crate::config::FeedType;
@@ -11,16 +12,15 @@ use crate::config::ProviderConfig;
 use crate::config::LogConfig;
 
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc; 
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc;
 
 use crate::db::buffer::DoubleBuffer;
-use crate::db::buffer::DataBuffer;
+use crate::db::postgresql::{PostgresDBRaw, RawRow};
 
 
 //This function is meant to allow you to call one function it then initiates a mpsc channel. This will be used to pass the tx to the the provided feed type
 // once it is determined what feed type is being created then this spans a new double buffer instance 
-pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfig,  provider_channel_tx: Sender<DataBuffer>, buffer_capacity: usize, buffer_trigger: f32 ) -> Result<(), anyhow::Error>{
+pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfig,  db: PostgresDBRaw, buffer_capacity: usize, buffer_trigger: f32 ) -> Result<(), anyhow::Error>{
     
     for symbol in provider_conf.symbol_feeds {   
         let (tx_feed, mut rx_feed) = mpsc::channel::<String>(buffer_capacity);
@@ -29,10 +29,11 @@ pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfi
         let symbol_name = symbol.symbol.clone();
         let provider_name = provider_conf.provider.clone();
         let log = Arc::new(Mutex::new(FeedLogger::new(log_conf.feed_log_location.clone(), provider_name.clone())?));
+        let mut sys_log = SysLogger::new(log_conf.system_log_location.clone(), "Kraken Raw Aggregator".to_string())?;
         let log_ctx = LoggerContext::new(symbol_name.clone(), symbol.feed_type);
         
 
-        let symbol_provider_channel_tx = provider_channel_tx.clone(); 
+        let sym_db = db.clone(); 
 
         match symbol.feed_type {
             FeedType::Trades => {
@@ -42,6 +43,7 @@ pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfi
                     kraken_trade_data_feed(symbols, tx_feed, log, log_ctx, provider_conf.reconnect_delay_secs, provider_conf.max_reconnect_attempts).await;
                 }); 
             }
+
             FeedType::Book => {
                 let log = Arc::clone(&log);
                 let log_ctx = log_ctx.clone();
@@ -68,11 +70,20 @@ pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfi
                     };
 
                     if let Ok(Some(buff)) = swap_result {
-                        if symbol_provider_channel_tx.send(buff).await.is_err() {
-                            let mut log = log.lock().unwrap();
-                            log.feed_log(LogType::Error, "Buffer was unable to send", &log_ctx);
-                            break;
-                        }
+                        let raw_data = match RawRow::data_buff_to_rawrows(buff) {
+                            Ok(raw_data) => raw_data,
+                            Err(e) => {
+                                sys_log.sys_log(LogType::Error, &format!("Kraken Raw Feed Aggregator failed to convert raw date to row: {}", e));
+                                break
+                            }
+                        };
+                        match sym_db.insert_raw_data_batch(raw_data).await{
+                            Ok(()) => (),
+                            Err(e)=> {
+                                sys_log.sys_log(LogType::Error, &format!("Kraken Raw Feed Aggregator failed to insert to DB: {}", e));
+                                break
+                            }
+                        };
                     }        
                 }
             });
