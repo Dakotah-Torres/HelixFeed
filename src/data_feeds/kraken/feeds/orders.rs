@@ -1,8 +1,8 @@
-use std::env;
+
 use futures_util::StreamExt;
 use serde::{Serialize, Deserialize};
 use tokio_tungstenite::tungstenite::protocol::Message;
-use crate::data_feeds::kraken::connection::connector::{KRAKEN_AUTH_URL, CHANNEL_ORDERS_L3, kraken_connect};
+use crate::data_feeds::kraken::connection::connector::{KRAKEN_AUTH_URL, CHANNEL_ORDERS_L3, kraken_connect, get_kraken_ws_token};
 use std::sync::{Arc, Mutex};
 use crate::logging::feed_logger::{FeedLogger, LoggerContext};
 use crate::logging::LogType;
@@ -57,7 +57,6 @@ pub struct KrakenOrdersReqOuter {
 
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KrakenOrderBidAsk<'a> {
     order_id: &'a str,
@@ -65,8 +64,6 @@ pub struct KrakenOrderBidAsk<'a> {
     order_qty: f64,
     timestamp: &'a str
 }
-
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KrakenOrderResObject<'a> {
@@ -80,17 +77,31 @@ pub struct KrakenOrderResObject<'a> {
 
 
 pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext, reconnect_delay_secs: u32, max_reconnect_attempts: u32){
-    let api_key = env::var("KRAKEN_WEB_SOCKET_KEY")
-        .expect("KRAKEN_API_SECRET not set in .env");
+    let mut attempts = 0;
+    
     {
         let mut log = logger.lock().unwrap();
         log.feed_log(LogType::Info, "started", &log_ctx);
         log.feed_log(LogType::Info, &format!("Order Engine Starting: {}", symbols.join(", ")), &log_ctx);
-        let api_hash = hash_string(&api_key);
-        log.feed_log(LogType::Info, &format!("API CONNECTED | CONFIRMATION KEY: {}", api_hash), &log_ctx);
+        
     }
 
-    let mut attempts = 0;
+    let api_key = match get_kraken_ws_token().await {
+        Ok(token) => token,
+        Err(e) => {
+            let mut log = logger.lock().unwrap();
+            log.feed_log(LogType::Error, &format!("API Key Unable to be retrieved: {} - Ending process", e), &log_ctx);
+            return
+        }
+    };
+    
+    {
+        let mut log = logger.lock().unwrap();
+        let api_hash = hash_string(&api_key);
+        log.feed_log(LogType::Info, &format!("API CONNECTED | CONFIRMATION KEY: {}", api_hash), &log_ctx); 
+    
+    }
+    
     
     
     let params = KrakenOrdersReqInnerParams {
@@ -133,6 +144,16 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
         
         while let Some(message) = stream.next().await {
             if let Ok(Message::Text(msg)) = message {
+                let is_orders = serde_json::from_str::<serde_json::Value>(&msg)
+                    .ok()
+                    .and_then(|v| v.get("channel").and_then(|c| c.as_str().map(|s| s.to_string())))
+                    .map(|channel| channel == CHANNEL_ORDERS_L3)
+                    .unwrap_or(false);
+
+                if !is_orders {
+                    continue;
+                }
+
                 if tx.send(msg).await.is_err() {
                     let mut log = logger.lock().unwrap();
                     log.feed_log(LogType::Error, "Orders: receiver dropped, shutting down", &log_ctx);

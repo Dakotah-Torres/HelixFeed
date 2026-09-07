@@ -112,11 +112,21 @@ pub async fn kraken_book_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String
     
         while let Some(message) = stream.next().await {
             if let Ok(Message::Text(msg)) = message {
-                if tx.send(msg).await.is_ok(){
+                let is_book = serde_json::from_str::<serde_json::Value>(&msg)
+                    .ok()
+                    .and_then(|v| v.get("channel").and_then(|c| c.as_str().map(|s| s.to_string())))
+                    .map(|channel| channel == "book")
+                    .unwrap_or(false);
+
+                if !is_book {
+                    continue;
+                }
+
+                if tx.send(msg).await.is_err(){
                     let mut log = logger.lock().unwrap();
                     log.feed_log(LogType::Error, "Book: receiver dropped, shutting down", &log_ctx);
-                
-                } 
+                    break;
+                }
             }
 
         }

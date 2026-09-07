@@ -42,5 +42,6 @@ impl SysLogger {
         ); 
 
         let _ = self.writer.write_all(line.as_bytes());
+        let _ = self.writer.flush();
     }
 }

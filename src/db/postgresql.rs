@@ -49,7 +49,7 @@ impl PostgresDBRaw {
     config.user, config.password, config.host, config.port, config.database);
         
         let pool = PgPoolOptions::new()
-            .max_connections(5)
+            .max_connections(20)
             .connect(&db_url)
             .await?;
         

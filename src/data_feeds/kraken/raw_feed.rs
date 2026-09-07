@@ -22,7 +22,7 @@ use crate::db::postgresql::{PostgresDBRaw, RawRow};
 // once it is determined what feed type is being created then this spans a new double buffer instance 
 pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfig,  db: PostgresDBRaw, buffer_capacity: usize, buffer_trigger: f32 ) -> Result<(), anyhow::Error>{
     
-    for symbol in provider_conf.symbol_feeds {   
+    for symbol in provider_conf.symbol_feeds {
         let (tx_feed, mut rx_feed) = mpsc::channel::<String>(buffer_capacity);
         let symbols = vec![symbol.symbol.clone()];
         
@@ -33,7 +33,7 @@ pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfi
         let log_ctx = LoggerContext::new(symbol_name.clone(), symbol.feed_type);
         
 
-        let sym_db = db.clone(); 
+        let sym_db = db.clone();
 
         match symbol.feed_type {
             FeedType::Trades => {
@@ -41,7 +41,7 @@ pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfi
                 let log_ctx = log_ctx.clone();
                 tokio::spawn(async move {
                     kraken_trade_data_feed(symbols, tx_feed, log, log_ctx, provider_conf.reconnect_delay_secs, provider_conf.max_reconnect_attempts).await;
-                }); 
+                });
             }
 
             FeedType::Book => {

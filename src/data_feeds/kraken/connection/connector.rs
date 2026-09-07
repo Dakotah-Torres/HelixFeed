@@ -7,9 +7,12 @@ use futures_util::stream::SplitStream;
 use serde::Serialize;
 use std::time:: {SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sha2::{Sha256, Digest, Sha512};
 use hmac:: { Hmac, Mac, KeyInit};
 use base64::{Engine as _, engine::general_purpose};
+use lazy_static::lazy_static;
+use tokio::sync::Mutex as AsyncMutex;
 
 
 use crate::data_feeds::traits::DataProvider;
@@ -48,13 +51,46 @@ pub async fn kraken_connect<T: Serialize>(connection_request: T, _url:&str) -> R
 
 }
 
-pub async fn get_kraken_ws_token() -> Result<String, anyhow::Error> {
-    // generate nonce
-    let nonce = SystemTime::now()
+lazy_static! {
+    // Shared across every call to get_kraken_ws_token(), from every feed task, so
+    // concurrent authenticated requests can never generate colliding or out-of-order
+    // nonces — Kraken requires each nonce to be strictly greater than the last one it
+    // saw for a given API key, across ALL uses of that key, not just per-caller.
+    static ref LAST_NONCE: AtomicU64 = AtomicU64::new(0);
+
+    // Generating an increasing nonce isn't enough on its own — Kraken cares about the
+    // order requests *arrive* at its server, not the order their nonces were generated.
+    // Two concurrent requests can still arrive out of order over the network. This
+    // mutex forces every token fetch (nonce generation through the HTTP round-trip)
+    // to fully complete, one at a time, so requests always reach Kraken in the same
+    // order their nonces were handed out.
+    static ref TOKEN_FETCH_LOCK: AsyncMutex<()> = AsyncMutex::new(());
+}
+
+/// Returns a nonce that is always strictly greater than the previous one this process
+/// generated, even if called many times concurrently within the same millisecond.
+fn next_nonce() -> u64 {
+    let now_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards")
-        .as_millis()
-        .to_string();
+        .as_millis() as u64;
+
+    let mut current = LAST_NONCE.load(Ordering::SeqCst);
+    loop {
+        let candidate = std::cmp::max(now_millis, current + 1);
+        match LAST_NONCE.compare_exchange(current, candidate, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return candidate,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+pub async fn get_kraken_ws_token() -> Result<String, anyhow::Error> {
+    // Held for the whole function — see TOKEN_FETCH_LOCK's doc comment above.
+    let _guard = TOKEN_FETCH_LOCK.lock().await;
+
+    // generate nonce
+    let nonce = next_nonce().to_string();
 
     // build post body
     let mut params = HashMap::new();
@@ -63,7 +99,7 @@ pub async fn get_kraken_ws_token() -> Result<String, anyhow::Error> {
 
     // read credentials from .env
     let api_key    = std::env::var("KRAKEN_API_KEY")?;
-    let api_secret = std::env::var("KRAKEN_API_SECRET")?;
+    let api_secret = std::env::var("KRAKEN_API_PRIVATE_KEY")?;
 
     // step 1 — SHA256 hash of nonce + post body
     let encoded     = format!("{}{}", nonce, post_data);
