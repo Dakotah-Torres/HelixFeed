@@ -1,0 +1,12 @@
+[Unit]
+Description=Run HelixFeed normalization hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
+
+

@@ -25,6 +25,10 @@ struct RawOrdersEnvelope {
 
 #[derive(Deserialize, Serialize)]
 struct RawOrderLevel {
+    // Only present on "update" messages (add/modify/delete) — absent on the initial
+    // "snapshot" message, since a snapshot is just "here are the orders", not an event.
+    #[serde(default)]
+    event: Option<String>,
     order_id: String,
     limit_price: f64,
     order_qty: f64,

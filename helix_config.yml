@@ -7,8 +7,20 @@ providers:
         symbol: "BTC/USD"
         feed_type: trades
       - markets: crypto
+        symbol: "BTC/USD"
+        feed_type: book
+      - markets: crypto
+        symbol: "BTC/USD"
+        feed_type: orders
+      - markets: crypto
         symbol: "ETC/USD"
         feed_type: trades
+      - markets: crypto
+        symbol: "ETC/USD"
+        feed_type: book
+      - markets: crypto
+        symbol: "ETC/USD"
+        feed_type: orders
 
 database_conf:
   postgres_config:

@@ -1,0 +1,15 @@
+[Unit]
+Description=HelixFeed market data ingestion daemon
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=REPLACE_WITH_USER
+WorkingDirectory=REPLACE_WITH_PATH/HelixFeed
+ExecStart=REPLACE_WITH_PATH/HelixFeed/target/release/helix_feed
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

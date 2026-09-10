@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub const PARQUET_ARCHIVE_DIR: &str = "parquet_archive";
-const FETCH_BATCH_SIZE: i64 = 10_000;
+const FETCH_BATCH_SIZE: i64 = 200_000;
 
 #[derive(Debug, Clone)]
 pub struct RawRecord {
@@ -122,10 +122,10 @@ fn write_parquet_archive(raw: &[RawRecord], data_type: &str) -> Result<(), anyho
     Ok(())
 }
 
-/// One normalization pass for a single data_type: fetch unprocessed raw rows, archive
-/// them to Parquet, transform + insert into the typed normalized table, then delete
-/// exactly those raw rows. Returns how many raw rows were processed.
-pub async fn run_for_data_type(pool: &PgPool, data_type: &str) -> Result<usize, anyhow::Error> {
+/// One bounded chunk: fetch up to FETCH_BATCH_SIZE unprocessed raw rows, archive them
+/// to Parquet, transform + insert into the typed normalized table, then delete exactly
+/// those raw rows. Returns how many raw rows this one chunk processed (0 = nothing left).
+async fn run_one_batch(pool: &PgPool, data_type: &str) -> Result<usize, anyhow::Error> {
     let raw = fetch_unprocessed(pool, data_type, FETCH_BATCH_SIZE).await?;
     if raw.is_empty() {
         return Ok(0);
@@ -145,6 +145,22 @@ pub async fn run_for_data_type(pool: &PgPool, data_type: &str) -> Result<usize, 
     delete_processed(pool, &ids).await?;
 
     Ok(raw.len())
+}
+
+/// Keeps calling run_one_batch until it comes back empty, so the whole backlog for this
+/// data_type is cleared in one call regardless of how large it's grown — not just one
+/// bounded chunk. Returns the total number of raw rows processed across every chunk.
+pub async fn run_for_data_type(pool: &PgPool, data_type: &str) -> Result<usize, anyhow::Error> {
+    let mut total = 0;
+    loop {
+        let processed = run_one_batch(pool, data_type).await?;
+        if processed == 0 {
+            break;
+        }
+        total += processed;
+        println!("normalizer: cleared a batch of {} '{}' rows (running total {})", processed, data_type, total);
+    }
+    Ok(total)
 }
 
 pub async fn run_all(pool: &PgPool) -> Result<(), anyhow::Error> {
