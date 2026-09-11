@@ -103,8 +103,13 @@ impl DoubleBuffer {
     }
 
     pub fn buffer_push_and_swap(&self, message: String, provider_name: String, symbol_conf: SymbolConfig,  logger: &mut FeedLogger, ctx: &LoggerContext) -> Result<Option<DataBuffer>, anyhow::Error> {
-        logger.feed_log(LogType::Info, "Initiating Push To Buffer", ctx);
-        
+        // No per-message log here on purpose. This function runs on every single message —
+        // thousands per second on a busy channel like Book/Orders — and logging "Initiating
+        // Push To Buffer" every time was drowning the log file in noise with zero diagnostic
+        // value: it can't tell you anything is wrong, only that a message arrived, which is
+        // the normal case. Logs below are reserved for state changes (buffer swaps) and
+        // anomalies, which is what actually matters when troubleshooting.
+
         let mut buffer = self.inner_store.lock().unwrap();
         let inner_store: &mut DataStore = &mut *buffer;
         inner_store.active.push_message(message);
@@ -113,7 +118,8 @@ impl DoubleBuffer {
         inner_store.active.set_provider(provider_name);
 
         if inner_store.active.trigger_swap() {
-            logger.feed_log(LogType::Info, "Buffer Trigger Limit Reached", ctx);
+            let flushed_count = inner_store.active.capacity_check();
+            logger.feed_log(LogType::Info, &format!("Buffer swap triggered - flushing {} messages to the DB inserter", flushed_count), ctx);
             std::mem::swap(&mut inner_store.active, &mut inner_store.standby);
 
             let capacity = inner_store.standby.capacity;

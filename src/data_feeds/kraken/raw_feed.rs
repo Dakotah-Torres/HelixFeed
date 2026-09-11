@@ -70,22 +70,36 @@ pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfi
                     };
 
                     if let Ok(Some(buff)) = swap_result {
+                        let batch_size = buff.get_messages().len();
                         let raw_data = match RawRow::data_buff_to_rawrows(buff) {
                             Ok(raw_data) => raw_data,
                             Err(e) => {
-                                sys_log.sys_log(LogType::Error, &format!("Kraken Raw Feed Aggregator failed to convert raw date to row: {}", e));
+                                // This kills the loop below, which permanently ends this
+                                // symbol/feed_type's DB inserter task - the WS feed keeps
+                                // running and buffering normally, but nothing gets written
+                                // to Postgres again until the service is restarted. That
+                                // consequence isn't obvious from "failed to convert" alone,
+                                // so it's spelled out here rather than left implicit.
+                                sys_log.sys_log(LogType::Error, &format!("Kraken Raw Feed Aggregator ({} {}) failed to convert a batch of {} raw rows: {} - this inserter is now permanently stopped until the service restarts", provider_name, symbol_name, batch_size, e));
                                 break
                             }
                         };
                         match sym_db.insert_raw_data_batch(raw_data).await{
                             Ok(()) => (),
                             Err(e)=> {
-                                sys_log.sys_log(LogType::Error, &format!("Kraken Raw Feed Aggregator failed to insert to DB: {}", e));
+                                sys_log.sys_log(LogType::Error, &format!("Kraken Raw Feed Aggregator ({} {}) failed to insert a batch of {} rows to DB: {} - this inserter is now permanently stopped until the service restarts", provider_name, symbol_name, batch_size, e));
                                 break
                             }
                         };
-                    }        
+                    }
                 }
+                // recv() only returns None once every sender is dropped - here that means
+                // the WS feed task for this symbol/feed_type exited (panicked, hit its
+                // reconnect-attempt ceiling, or an API-token failure) without this task
+                // knowing why. Whatever the WS-side log says is the real cause; this line
+                // just makes sure "the DB inserter went quiet too" shows up in system.log
+                // rather than the task just vanishing with no trace.
+                sys_log.sys_log(LogType::Warn, &format!("Kraken Raw Feed Aggregator ({} {}): feed channel closed (WS task exited) - DB inserter shutting down", provider_name, symbol_name));
             });
     }
     Ok(())

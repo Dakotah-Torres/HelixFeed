@@ -33,6 +33,16 @@ pub const CHANNEL_BOOK_L2: &str = "book";
 pub const CHANNEL_ORDERS_L3: &str = "level3";
 pub const CHANNEL_TRADES: &str = "trade";
 
+/// If a feed goes this long without receiving ANY frame at all — not data, not a ping/pong,
+/// not even a close — the connection is treated as stale and force-reconnected. This is what
+/// catches a zombie TCP connection: one where the socket never errors and never closes,
+/// Kraken just stops sending, and `stream.next().await` would otherwise block forever with
+/// no log output at all. This is exactly what took the BTC/USD Orders feed down on
+/// 2026-09-10 — it went quiet at 21:19:16 and never reconnected because nothing was
+/// watching for silence itself. See docs/logging.md for the full breakdown of where this
+/// gets checked and logged.
+pub const STALE_CONNECTION_TIMEOUT_SECS: u64 = 60;
+
 
 pub async fn kraken_connect<T: Serialize>(connection_request: T, _url:&str) -> Result<KrakenReadStream, anyhow::Error> {
 

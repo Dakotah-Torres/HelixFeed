@@ -3,6 +3,8 @@ use crate::config::load_config;
 use crate::config::validate_config;
 use crate::data_feeds::kraken::raw_feed::kraken_raw_feed_channel;
 use crate::db::postgresql::PostgresDBRaw;
+use crate::logging::sys_logger::SysLogger;
+use crate::logging::LogType;
 
 // at the top of run_feed()
 
@@ -28,12 +30,22 @@ pub async fn feed_runner(config: &str) -> Result<(), anyhow::Error> {
         tokio::spawn( async move {
             match provider.provider.as_str() {
                 "kraken" => {
-                    if let Err(e) = kraken_raw_feed_channel(provider, log_config, provider_db_connection, buffer_cap, buffer_trig) {
-                        eprint!("Kraken feed setup failed: {e}");
+                    if let Err(e) = kraken_raw_feed_channel(provider, log_config.clone(), provider_db_connection, buffer_cap, buffer_trig) {
+                        // This is provider setup failing before a single feed task even
+                        // spawns (e.g. FeedLogger::new() couldn't open its log file) - it
+                        // previously only went to eprint!, which systemd captures to the
+                        // journal but nobody actually checks there. Routed into system.log
+                        // so it shows up next to every other startup/system-level error,
+                        // with a stderr fallback in case SysLogger::new() itself can't open
+                        // the file (so the signal is never fully lost either way).
+                        match SysLogger::new(log_config.system_log_location.clone(), "Kraken Provider Setup".to_string()) {
+                            Ok(mut sys_log) => sys_log.sys_log(LogType::Error, &format!("Kraken feed setup failed: {e}")),
+                            Err(log_err) => eprintln!("Kraken feed setup failed: {e} (and could not open system log: {log_err})"),
+                        }
                     }
                 }
                 _ => {
-                    print!("Unknown provider: {}", provider.provider);
+                    eprintln!("Unknown provider configured: {} - no feed started for it", provider.provider);
                 }
             }
         });
