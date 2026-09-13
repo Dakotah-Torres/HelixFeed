@@ -49,6 +49,7 @@ pub struct PostgresConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct R2Config {
     pub bucket: String,
+    pub endpoint: String,
     pub upload_schedule: String,
 }
 
@@ -195,6 +196,7 @@ mod tests {
                 },
                 r2: Some(R2Config {
                     bucket: "helixfeed-archive".to_string(),
+                    endpoint: "...".to_string(),
                     upload_schedule: "weekly".to_string(),
                 }),
             },

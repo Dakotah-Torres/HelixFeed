@@ -15,7 +15,8 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub const PARQUET_ARCHIVE_DIR: &str = "parquet_archive";
+pub const PARQUET_ARCHIVE_STAGE: &str = "parquet_archive/sta";
+pub const PARQUET_ARCHIVE_FAILED: &str = "parquet_archive";
 const FETCH_BATCH_SIZE: i64 = 200_000;
 
 #[derive(Debug, Clone)]

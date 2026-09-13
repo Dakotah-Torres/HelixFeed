@@ -2,3 +2,5 @@
 /logs
 /parquet_archive
 .env
+
+helix_config.yml

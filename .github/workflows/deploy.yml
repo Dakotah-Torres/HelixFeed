@@ -1,15 +1,19 @@
 name: quant-data-ingestion
 on:
   push:
-    branches: ["main"]
+    tags:
+      - "v*.*.*"
 jobs:
   deploy:
     runs-on: self-hosted
-    steps:                         
+    steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Build and Run
-        run: |                    
+        run: |
           source $HOME/.cargo/env
           cargo build --release
           echo "HelixFeed Build Successful on Quant Server"
+          sudo systemctl restart helixfeed.service
+          sleep 5
+          systemctl is-active helixfeed.service

@@ -27,9 +27,12 @@ database_conf:
     host: localhost
     port: "5432"
     database: helixfeed_dev
-    user: "helixfeed"
-    password: "devpassword"
-  # r2 omitted entirely — it's Option<R2Config> with #[serde(default)], so leaving it out is valid
+    user: "CHANGE_ME"
+    password: "CHANGE_ME"
+  r2:
+    bucket: "CHANGE_ME"
+    endpoint: "https://<your-cloudflare-account-id>.r2.cloudflarestorage.com/"
+    upload_schedule: "hourly"
 
 log_config:
   feed_log_location: "logs/kraken.log"
@@ -37,9 +40,3 @@ log_config:
 
 buffer_capacity: 100
 buffer_swap_trigger: 0.8
-  
-  
-  
-  
-  
-  
