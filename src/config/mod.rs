@@ -51,6 +51,7 @@ pub struct R2Config {
     pub bucket: String,
     pub endpoint: String,
     pub upload_schedule: String,
+    pub max_upload_attempts: u32
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -198,6 +199,7 @@ mod tests {
                     bucket: "helixfeed-archive".to_string(),
                     endpoint: "...".to_string(),
                     upload_schedule: "weekly".to_string(),
+                    max_upload_attempts: 5,
                 }),
             },
             log_config: LogConfig {

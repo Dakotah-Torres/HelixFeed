@@ -15,8 +15,8 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub const PARQUET_ARCHIVE_STAGE: &str = "parquet_archive/sta";
-pub const PARQUET_ARCHIVE_FAILED: &str = "parquet_archive";
+pub const PARQUET_ARCHIVE_STAGE: &str = "parquet_archive/staging";
+pub const PARQUET_ARCHIVE_READY: &str = "parquet_archive/ready";
 const FETCH_BATCH_SIZE: i64 = 200_000;
 
 #[derive(Debug, Clone)]
@@ -78,7 +78,7 @@ pub async fn delete_processed(pool: &PgPool, ids: &[i32]) -> Result<(), anyhow::
 fn archive_path(data_type: &str) -> PathBuf {
     let now = Utc::now();
     let filename = format!("{}_{}.parquet", data_type, now.format("%Y%m%dT%H%M%SZ"));
-    PathBuf::from(PARQUET_ARCHIVE_DIR).join(filename)
+    PathBuf::from(PARQUET_ARCHIVE_STAGE).join(filename)
 }
 
 /// Archives the raw rows exactly as ingested (id, provider, data_type, symbol, raw JSON)
@@ -119,6 +119,9 @@ fn write_parquet_archive(raw: &[RawRecord], data_type: &str) -> Result<(), anyho
     let mut writer = ArrowWriter::try_new(file, schema, Some(props))?;
     writer.write(&batch)?;
     writer.close()?;
+
+    let ready_path = PathBuf::from(PARQUET_ARCHIVE_READY).join(path.file_name().unwrap());
+    std::fs::rename(path,ready_path)?;
 
     Ok(())
 }
@@ -165,7 +168,7 @@ pub async fn run_for_data_type(pool: &PgPool, data_type: &str) -> Result<usize, 
 }
 
 pub async fn run_all(pool: &PgPool) -> Result<(), anyhow::Error> {
-    std::fs::create_dir_all(PARQUET_ARCHIVE_DIR)?;
+    std::fs::create_dir_all(PARQUET_ARCHIVE_STAGE)?;
 
     for data_type in ["trades", "book", "orders"] {
         let processed = run_for_data_type(pool, data_type).await?;

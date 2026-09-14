@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use helix_feed::config::load_config;
-use helix_feed::normalizer::{book, orders, trades, RawRecord, PARQUET_ARCHIVE_DIR};
+use helix_feed::normalizer::{book, orders, trades, RawRecord, PARQUET_ARCHIVE_STAGE};
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::RowAccessor;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -44,7 +44,7 @@ async fn main() -> Result<(), anyhow::Error> {
     );
     let pool = PgPoolOptions::new().max_connections(5).connect(&db_url).await?;
 
-    let archive_dir = Path::new(PARQUET_ARCHIVE_DIR);
+    let archive_dir = Path::new(PARQUET_ARCHIVE_STAGE);
     let prefix = format!("{}_", data_type);
 
     let mut files: Vec<_> = std::fs::read_dir(archive_dir)?

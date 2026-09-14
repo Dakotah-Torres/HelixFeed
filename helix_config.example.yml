@@ -33,6 +33,7 @@ database_conf:
     bucket: "CHANGE_ME"
     endpoint: "https://<your-cloudflare-account-id>.r2.cloudflarestorage.com/"
     upload_schedule: "hourly"
+    max_upload_attempts: 5
 
 log_config:
   feed_log_location: "logs/kraken.log"
