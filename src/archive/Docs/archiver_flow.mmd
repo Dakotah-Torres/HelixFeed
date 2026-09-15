@@ -1,0 +1,39 @@
+flowchart TD
+    start(Archiver Triggered)
+    check_failed{Failed folder has files?}
+    check_staging{Staging folder has files?}
+    endnode(Archiver Ended)
+
+    start --> check_failed
+    check_failed -->|Yes| pf_failed[[process_folder: Failed]]
+    check_failed -->|No| check_staging
+    pf_failed --> check_staging
+    check_staging -->|Yes| pf_staging[[process_folder: Staging]]
+    check_staging -->|No| endnode
+    pf_staging --> endnode
+
+    subgraph pf[process_folder]
+        direction TD
+        pf_start(Triggered with folder_name)
+        get_file[[Get next file]]
+        send[[Send file to R2 via archiver]]
+        sent{Send succeeded?}
+        check_log[[Look up file in failure log]]
+        in_log{Entry exists?}
+        first_fail[[Move file to Failed folder, create log entry, attempt = 1]]
+        increment[[Increment attempt count]]
+        max{attempt >= max?}
+        corrupt[[Move file to Corrupted folder, mark entry as corrupted]]
+        more{More files?}
+        pf_end(process_folder complete)
+
+        pf_start --> get_file --> send --> sent
+        sent -->|Success| more
+        sent -->|Failure| check_log --> in_log
+        in_log -->|No| first_fail --> more
+        in_log -->|Yes| increment --> max
+        max -->|Yes| corrupt --> more
+        max -->|No| more
+        more -->|Yes| get_file
+        more -->|No| pf_end
+    end

@@ -4,6 +4,7 @@ use std::io::Write;
 use chrono::Local;
 use crate::logging::LogType;
 
+
 pub struct SysLogger {
     pub log_path: String, 
     pub system: String,  
