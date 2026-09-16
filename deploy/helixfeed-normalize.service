@@ -7,3 +7,4 @@ Type=oneshot
 User=REPLACE_WITH_USER
 WorkingDirectory=REPLACE_WITH_PATH/HelixFeed
 ExecStart=REPLACE_WITH_PATH/HelixFeed/target/release/normalize
+ExecStartPre=/bin/ln -sf /home/dakotah/secrets/helix_config.yml /home/dakotah/actions-runner/_work/HelixFeed/HelixFeed/helix_config.yml

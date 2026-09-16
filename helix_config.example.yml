@@ -1,6 +1,6 @@
 providers:
   - provider: kraken
-    reconnect_delay_secs: 5
+    reconnect_delay_secs: 10
     max_reconnect_attempts: 5
     symbol_feeds:
       - markets: crypto
@@ -25,7 +25,7 @@ providers:
 database_conf:
   postgres_config:
     host: localhost
-    port: "5432"
+    port: "5433"
     database: helixfeed_dev
     user: "CHANGE_ME"
     password: "CHANGE_ME"
