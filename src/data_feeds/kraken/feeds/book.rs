@@ -76,7 +76,7 @@ pub async fn kraken_book_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String
         channel: CHANNEL_BOOK_L2.to_string(),
         symbol: symbols,
         depth: BookDepth::OneHundred,
-        snapshot:false
+        snapshot:true
     };
     let outer = KrakenBookReqOuter {
         method: "subscribe".to_string(),
