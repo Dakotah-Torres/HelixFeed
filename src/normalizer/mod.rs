@@ -169,7 +169,7 @@ pub async fn run_for_data_type(pool: &PgPool, data_type: &str) -> Result<usize, 
 
 pub async fn run_all(pool: &PgPool) -> Result<(), anyhow::Error> {
     std::fs::create_dir_all(PARQUET_ARCHIVE_STAGE)?;
-
+    std::fs::create_dir_all(PARQUET_ARCHIVE_READY)?;
     for data_type in ["trades", "book", "orders"] {
         let processed = run_for_data_type(pool, data_type).await?;
         println!("normalizer: processed {} raw '{}' rows", processed, data_type);
