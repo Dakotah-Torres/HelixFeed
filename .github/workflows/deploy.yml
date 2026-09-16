@@ -17,3 +17,7 @@ jobs:
           sudo systemctl restart helixfeed.service
           sleep 5
           systemctl is-active helixfeed.service
+          sudo systemctl restart helixfeed-archive.service
+          sleep 5
+          sudo systemctl restart helixfeed-archive.service
+          sudo systemctl enable helixfeed-archive.timer
