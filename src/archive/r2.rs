@@ -50,7 +50,7 @@ impl R2Archiver {
     }
     
     pub fn archiver(&self) -> Result<(), anyhow::Error> {
-        
+        Ok(())
     }
 
 
