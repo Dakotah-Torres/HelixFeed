@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=REPLACE_WITH_USER
 WorkingDirectory=REPLACE_WITH_PATH/HelixFeed
+EnvironmentFile=/home/dakotah/secrets/helixfeed.env
 ExecStart=REPLACE_WITH_PATH/HelixFeed/target/release/helix_feed
 ExecStartPre=/bin/ln -sf /home/dakotah/secrets/helix_config.yml /home/dakotah/actions-runner/_work/HelixFeed/HelixFeed/helix_config.yml
 Restart=on-failure
