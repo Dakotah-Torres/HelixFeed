@@ -135,8 +135,8 @@ impl R2Archiver {
                 Ok(()) => continue, 
                 Err(_e) => {
                     //edit logfile here
-                    let path = file_path.to_str().expect("Invalid Path");
-                    let (atempts, fail_sidecar): (u32, PathBuf) = match Self::log_failed(path) {
+                    let file_name = file_path.file_name().to_str().expect("Invalid Path");
+                    let (atempts, fail_sidecar): (u32, PathBuf) = match Self::log_failed(file_name) {
                         Ok((atempts, fail_sidecar)) => {
                             self.corrupt_clean_up(file_path, atempts, fail_sidecar)?;
                             continue;

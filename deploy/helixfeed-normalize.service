@@ -7,3 +7,4 @@ Type=oneshot
 User=REPLACE_WITH_USER
 WorkingDirectory=REPLACE_WITH_PATH/HelixFeed
 ExecStart=REPLACE_WITH_PATH/HelixFeed/target/release/normalize
+EnvironmentFile=/home/dakotah/secrets/helixfeed.env
