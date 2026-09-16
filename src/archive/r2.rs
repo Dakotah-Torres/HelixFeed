@@ -7,9 +7,9 @@ use std::io::{Seek, SeekFrom, Write, Read};
 use crate::logging::LogType;
 use crate::logging::sys_logger::SysLogger;
 
-const PARQUET_ARCHIVE_READY: &str = "parquet_archive/ready";
-const PARQUET_ARCHIVE_FAILD: &str = "parquet_archive/failed";
-const PARQUET_ARCHIVE_CORRUPT: &str= "parquet_archive/corrupt";
+pub const PARQUET_ARCHIVE_READY: &str = "parquet_archive/ready";
+pub const PARQUET_ARCHIVE_FAILD: &str = "parquet_archive/failed";
+pub const PARQUET_ARCHIVE_CORRUPT: &str = "parquet_archive/corrupt";
 
 pub struct R2Archiver {
     client: Client,
@@ -132,21 +132,46 @@ impl R2Archiver {
             let file_path: &Path  = file.as_path();
             let prefix = Self::get_file_prefix(&file_path)?;
             match self.r2_archiver(&file_path, prefix).await{
-                Ok(()) => continue, 
-                Err(_e) => {
-                    //edit logfile here
-                    let file_name = file_path.file_name().to_str().expect("Invalid Path");
-                    let (atempts, fail_sidecar): (u32, PathBuf) = match Self::log_failed(file_name) {
-                        Ok((atempts, fail_sidecar)) => {
-                            self.corrupt_clean_up(file_path, atempts, fail_sidecar)?;
+                Ok(()) => {
+                    self.logging.sys_log(LogType::Info, &format!("Uploaded {} to R2", file_path.display()));
+
+                    match std::fs::remove_file(file_path) {
+                        Ok(()) => {
+                            self.logging.sys_log(LogType::Info, &format!("Deleted local file {} after successful retry", file_path.display()));
+                        }
+                        Err(e) => {
+                            self.logging.sys_log(LogType::Error, &format!("Uploaded {} but failed to delete local copy: {}", file_path.display(), e));
+                        }
+                    }
+
+                    let sidecar_path = file_path.with_extension("attempts");
+                    match std::fs::remove_file(&sidecar_path) {
+                        Ok(()) => {
+                            self.logging.sys_log(LogType::Info, &format!("Deleted sidecar log {} after successful retry", sidecar_path.display()));
+                        }
+                        Err(e) => {
+                            self.logging.sys_log(LogType::Error, &format!("Failed to delete sidecar log {}: {}", sidecar_path.display(), e));
+                        }
+                    }
+
+                    continue;
+                },
+                Err(e) => {
+                    self.logging.sys_log(LogType::Warn, &format!("Retry upload failed for {}: {}", file_path.display(), e));
+
+                    let file_name = file_path.file_name().expect("file has no name").to_str().expect("Invalid Path");
+                    match Self::log_failed(file_name) {
+                        Ok((attempts, fail_sidecar)) => {
+                            if let Err(corrupt_err) = self.corrupt_clean_up(file_path, attempts, fail_sidecar) {
+                                self.logging.sys_log(LogType::Error, &format!("Failed to move {} to corrupt/: {}", file_path.display(), corrupt_err));
+                            }
                             continue;
                         }
-                        Err(_e) => {
+                        Err(log_err) => {
+                            self.logging.sys_log(LogType::Error, &format!("Failed to update retry sidecar for {}: {}", file_path.display(), log_err));
                             continue;
                         }
-                    };
-
-
+                    }
                 }
             }
 
@@ -156,12 +181,34 @@ impl R2Archiver {
             let file_path: &Path  = file.as_path();
             let prefix = Self::get_file_prefix(&file_path)?;
             match self.r2_archiver(&file_path, prefix).await {  
-                Ok(()) => continue,
-                Err(_e) => {
+                Ok(()) => {
+                    self.logging.sys_log(LogType::Info, &format!("Uploaded {} to R2", file_path.display()));
+
+                    match std::fs::remove_file(file_path) {
+                        Ok(()) => {
+                            self.logging.sys_log(LogType::Info, &format!("Deleted local file {} after successful upload", file_path.display()));
+                        }
+                        Err(e) => {
+                            self.logging.sys_log(LogType::Error, &format!("Uploaded {} but failed to delete local copy: {}", file_path.display(), e));
+                        }
+                    }
+
+                    continue;
+                },
+                Err(e) => {
+                    self.logging.sys_log(LogType::Warn, &format!("Upload failed for {}: {} - moving to failed/", file_path.display(), e));
+
                     let failed_path = PathBuf::from(PARQUET_ARCHIVE_FAILD).join(file.file_name().unwrap());
-                    std::fs::rename(file_path,failed_path)?;
-                    continue; 
-                } 
+                    match std::fs::rename(file_path, &failed_path) {
+                        Ok(()) => {
+                            self.logging.sys_log(LogType::Info, &format!("Moved {} to {}", file_path.display(), failed_path.display()));
+                        }
+                        Err(rename_err) => {
+                            self.logging.sys_log(LogType::Error, &format!("Failed to move {} to failed/: {}", file_path.display(), rename_err));
+                        }
+                    }
+                    continue;
+                }
             };
             
         }

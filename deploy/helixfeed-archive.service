@@ -1,0 +1,11 @@
+[Unit]
+Description=HelixFeed R2 archive job (ready/failed Parquet -> Cloudflare R2)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=REPLACE_WITH_USER
+WorkingDirectory=REPLACE_WITH_PATH/HelixFeed
+ExecStart=REPLACE_WITH_PATH/HelixFeed/target/release/archive
+EnvironmentFile=/home/dakotah/secrets/helixfeed.env
