@@ -5,10 +5,16 @@ use std::io::Read;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
+// TODO: Market (Crypto/Futures/Forex/Equities) is only known in config right now - it never
+// flows into the database. trades_normalized/book_normalized/orders_normalized have no
+// `market` column, so once non-crypto data starts coming in, there's no way to filter or
+// distinguish rows by market from the DB alone. Needs a migration to add a `market` column
+// to all three normalized tables, plus threading SymbolConfig.markets through the
+// normalizer's RawRecord -> insert path so it actually gets written.
 pub enum Market {
-    Crypto, 
+    Crypto,
     Futures,
-    Forex, 
+    Forex,
     Equities
 }
 
