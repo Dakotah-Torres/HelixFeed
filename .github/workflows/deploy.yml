@@ -8,7 +8,9 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4]
+        with:
+          clean: false
       - name: Build and Run
         run: |
           source $HOME/.cargo/env
