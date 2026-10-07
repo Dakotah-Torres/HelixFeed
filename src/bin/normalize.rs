@@ -24,6 +24,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
     run_all(&pool).await?;
 
+    // TODO(v1.1.0 logging): bare println! - see the TODO in normalizer/mod.rs for the full note
+    // on routing this batch job through SysLogger instead.
     println!("Normalization run complete.");
     Ok(())
 }

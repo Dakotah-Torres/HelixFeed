@@ -4,6 +4,7 @@ use serde_json;
 use chrono::{DateTime, Utc};
 use crate::config::FeedType;
 use crate::db::buffer::DataBuffer;
+use crate::db::inserter::RawSink;
 
 
 pub struct RawRow {
@@ -65,7 +66,9 @@ impl PostgresDBRaw {
     }
 
 
-    pub async fn insert_raw_data_batch(&self, rows: Vec<RawRow>) -> Result<(), anyhow::Error> {
+    // Takes a slice rather than an owned Vec so a failed insert can be retried with the
+    // same rows - see db/inserter.rs.
+    pub async fn insert_raw_data_batch(&self, rows: &[RawRow]) -> Result<(), anyhow::Error> {
         let received: Vec<DateTime<Utc>> = rows.iter().map(|r| r.received).collect(); 
         let data_provider: Vec<String> = rows.iter().map(|dp| dp.data_provider.clone()).collect();
         let data_type: Vec<String> = rows.iter().map(|dt| dt.data_type.as_str().to_string().clone()).collect();
@@ -87,6 +90,12 @@ impl PostgresDBRaw {
             .await?;
 
         Ok(())
+    }
+}
+
+impl RawSink for PostgresDBRaw {
+    async fn insert_batch(&self, rows: &[RawRow]) -> Result<(), anyhow::Error> {
+        self.insert_raw_data_batch(rows).await
     }
 }
 
@@ -176,7 +185,7 @@ mod test {
             },
         ];
         
-        db.insert_raw_data_batch(rows).await?;
+        db.insert_raw_data_batch(&rows).await?;
 
         // verify all 3 landed
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM raw_financial_data WHERE symbol = $1")

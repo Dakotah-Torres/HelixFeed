@@ -11,6 +11,7 @@ use hex;
 
 
 use tokio::sync::mpsc; 
+use std::future::Future;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(into ="u32")]
@@ -77,6 +78,16 @@ pub struct KrakenOrderResObject<'a> {
 
 
 pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext, reconnect_delay_secs: u32, max_reconnect_attempts: u32){
+    run_order_feed(KRAKEN_AUTH_URL, get_kraken_ws_token, symbols, tx, logger, log_ctx, reconnect_delay_secs, max_reconnect_attempts).await
+}
+
+/// The actual feed loop. The endpoint and the token fetcher are parameters so tests can run it
+/// against a local fake Kraken server with a fake token source.
+pub(crate) async fn run_order_feed<F, Fut>(url: &str, fetch_token: F, symbols: Vec<String>, tx: mpsc::Sender<String>, logger: Arc<Mutex<FeedLogger>>, log_ctx: LoggerContext, reconnect_delay_secs: u32, max_reconnect_attempts: u32)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<String, anyhow::Error>>,
+{
     let mut attempts = 0;
     
     {
@@ -86,51 +97,59 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
         
     }
 
-    let api_key = match get_kraken_ws_token().await {
-        Ok(token) => token,
-        Err(e) => {
-            let mut log = logger.lock().unwrap();
-            log.feed_log(LogType::Error, &format!("API Key Unable to be retrieved: {} - Ending process", e), &log_ctx);
-            return
-        }
-    };
-    
-    {
-        let mut log = logger.lock().unwrap();
-        let api_hash = hash_string(&api_key);
-        log.feed_log(LogType::Info, &format!("API CONNECTED | CONFIRMATION KEY: {}", api_hash), &log_ctx); 
-    
-    }
-    
-    
-    
-    let params = KrakenOrdersReqInnerParams {
-    channel: CHANNEL_ORDERS_L3.to_string(),
-    symbol: symbols,
-    depth: OrderDepth::OneHundred,
-    snapshot: false,
-    token: api_key, 
-    
-    };
-
-    let order_request = KrakenOrdersReqOuter {
-        method: "subscribe".to_string(),
-        params: params,
-        req_id: 1234
-    };
     loop {
-        let mut stream  = match kraken_connect(order_request.clone(), KRAKEN_AUTH_URL).await{
+        // A fresh token on EVERY connect, not once up front. Kraken WS tokens have to be used
+        // within 15 minutes of being issued - the old code fetched one before this loop, so any
+        // reconnect after that subscribed with an expired token. Kraken's error reply isn't a
+        // level3 message so it got filtered out, the stale timeout fired 60s later, and the feed
+        // reconnected with the same dead token forever, silently.
+        let token = match fetch_token().await {
+            Ok(token) => {
+                let mut log = logger.lock().unwrap();
+                log.feed_log(LogType::Info, &format!("API CONNECTED | CONFIRMATION KEY: {}", hash_string(&token)), &log_ctx);
+                token
+            }
+            Err(e) => {
+                attempts += 1;
+                {
+                    let mut log = logger.lock().unwrap();
+                    log.feed_log(LogType::Error, &format!("WS token could not be retrieved: {} - attempt {} out of {}", e, attempts, max_reconnect_attempts), &log_ctx);
+                    if attempts >= max_reconnect_attempts {
+                        log.feed_log(LogType::Error, "WS token could not be retrieved - Max Attempts reached Ending Connection", &log_ctx);
+                        return
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(reconnect_delay_secs as u64)).await;
+                continue;
+            }
+        };
+
+        let order_request = KrakenOrdersReqOuter {
+            method: "subscribe".to_string(),
+            params: KrakenOrdersReqInnerParams {
+                channel: CHANNEL_ORDERS_L3.to_string(),
+                symbol: symbols.clone(),
+                depth: OrderDepth::OneHundred,
+                snapshot: false,
+                token,
+            },
+            req_id: 1234
+        };
+
+        let mut stream  = match kraken_connect(order_request, url).await{
             Ok(stream) => {
                 attempts = 0;
                 {
                     let mut log = logger.lock().unwrap();
                     log.feed_log(LogType::Info, "Connected", &log_ctx);
                 }
+                // TODO(v1.1.0 metrics): FEED_UP{provider,symbol,feed_type}.set(1) here
                 stream
             }
 
             Err(e) => {
                 attempts +=1;
+                // TODO(v1.1.0 metrics): RECONNECT_ATTEMPTS_TOTAL{provider,symbol,feed_type}.inc() here
                 {
                     let mut log = logger.lock().unwrap();
                     log.feed_log(LogType::Error, &format!("Kraken Order Connection Failed - Below Error:\n {} \n Attempting to reconnect {} out of {} attempts", e, attempts, max_reconnect_attempts), &log_ctx);
@@ -152,6 +171,8 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
         // errored or closed" — this is exactly what took BTC/USD Orders down on 2026-09-10:
         // it went quiet at 21:19:16 and stream.next() just sat there forever with no log
         // output at all, no error, nothing. See docs/logging.md for the full breakdown.
+        // TODO(v1.1.0 metrics): FEED_UP{provider,symbol,feed_type}.set(0) on every `break`
+        // in this inner loop (stale timeout, stream end, close frame, read error, receiver dropped).
         loop {
             let next = tokio::time::timeout(
                 std::time::Duration::from_secs(STALE_CONNECTION_TIMEOUT_SECS),
@@ -191,10 +212,13 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
                         continue;
                     }
 
+                    // TODO(v1.1.0 metrics): TOTAL_MESSAGES{provider,symbol,feed_type}.inc() here
                     if tx.send(msg).await.is_err() {
                         let mut log = logger.lock().unwrap();
-                        log.feed_log(LogType::Error, "Orders: receiver dropped, shutting down", &log_ctx);
-                        break;
+                        log.feed_log(LogType::Error, "Orders: DB inserter is gone (receiver dropped) - stopping this feed instead of reconnecting", &log_ctx);
+                        // `return`, not `break`: a break only leaves the read loop, and the outer loop
+                        // would reconnect to Kraken, fail to send again, and repeat forever.
+                        return;
                     }
                 }
                 Ok(Message::Close(frame)) => {
@@ -222,3 +246,61 @@ pub async fn kraken_order_data_feed(symbols: Vec<String>, tx: mpsc::Sender<Strin
 
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::FeedType;
+    use crate::data_feeds::kraken::test_support::{eventually, fake_kraken, test_logger};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+
+    /// Regression test for the stale-token bug: every (re)connect must subscribe with a
+    /// freshly fetched token, never the one from the first connection.
+    #[tokio::test]
+    async fn every_reconnect_uses_a_fresh_token() {
+        // The server hangs up right after each subscribe, forcing a reconnect every time.
+        let server = fake_kraken(vec![], true).await;
+        let (logger, ctx) = test_logger(FeedType::Orders);
+        let (tx, _rx) = mpsc::channel(8);
+
+        let issued = Arc::new(AtomicU32::new(0));
+        let counter = Arc::clone(&issued);
+        let fetch_token = move || {
+            let n = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            async move { Ok(format!("token-{}", n)) }
+        };
+
+        let url = server.url.clone();
+        let feed = tokio::spawn(async move {
+            run_order_feed(&url, fetch_token, vec!["BTC/USD".to_string()], tx, logger, ctx, 0, 5).await
+        });
+
+        assert!(eventually(|| server.connection_count() >= 3).await, "feed should keep reconnecting");
+        feed.abort();
+
+        let subscribes = server.subscribes.lock().unwrap();
+        let tokens: Vec<&str> = subscribes.iter().take(3).map(|s| s["params"]["token"].as_str().unwrap()).collect();
+        assert_eq!(tokens, vec!["token-1", "token-2", "token-3"]);
+    }
+
+    #[tokio::test]
+    async fn gives_up_after_max_token_failures() {
+        let server = fake_kraken(vec![], false).await;
+        let (logger, ctx) = test_logger(FeedType::Orders);
+        let (tx, _rx) = mpsc::channel(8);
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let counter = Arc::clone(&calls);
+        let fetch_token = move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async { Err(anyhow::anyhow!("Kraken REST API unavailable")) }
+        };
+
+        let feed = run_order_feed(&server.url, fetch_token, vec!["BTC/USD".to_string()], tx, logger, ctx, 0, 3);
+        tokio::time::timeout(Duration::from_secs(5), feed).await.expect("feed should give up");
+
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert_eq!(server.connection_count(), 0, "never connect without a token");
+    }
+}

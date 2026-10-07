@@ -2,12 +2,13 @@ pub mod book;
 pub mod orders;
 pub mod trades;
 
-use arrow::array::{ArrayRef, Int32Array, StringArray};
+use arrow::array::{ArrayRef, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
+use parquet::record::{Row as ParquetRow, RowAccessor};
 use serde_json::Value;
 use sqlx::postgres::PgPool;
 use sqlx::Row;
@@ -21,7 +22,7 @@ const FETCH_BATCH_SIZE: i64 = 200_000;
 
 #[derive(Debug, Clone)]
 pub struct RawRecord {
-    pub id: i32,
+    pub id: i64,
     pub received: DateTime<Utc>,
     pub data_provider: String,
     pub data_type: String,
@@ -64,7 +65,7 @@ pub async fn fetch_unprocessed(
 /// Deletes exactly the given row IDs — never a blind TRUNCATE. Raw rows that land in
 /// the table *during* a normalization run simply aren't in this ID set, so they're
 /// left untouched for the next run rather than silently lost.
-pub async fn delete_processed(pool: &PgPool, ids: &[i32]) -> Result<(), anyhow::Error> {
+pub async fn delete_processed(pool: &PgPool, ids: &[i64]) -> Result<(), anyhow::Error> {
     if ids.is_empty() {
         return Ok(());
     }
@@ -73,6 +74,16 @@ pub async fn delete_processed(pool: &PgPool, ids: &[i32]) -> Result<(), anyhow::
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Reads the `id` column (column 0) of an archived raw row. Archives written before the
+/// 20261006120000_bigint_ids migration store it as INT32, newer ones as INT64 - backfill
+/// has to read both, since the old files are still sitting in the archive.
+pub fn read_archive_id(row: &ParquetRow) -> Result<i64, anyhow::Error> {
+    match row.get_long(0) {
+        Ok(id) => Ok(id),
+        Err(_) => Ok(i64::from(row.get_int(0)?)),
+    }
 }
 
 fn archive_path(data_type: &str) -> PathBuf {
@@ -86,7 +97,7 @@ fn archive_path(data_type: &str) -> PathBuf {
 /// before, the normalized-table insert below.
 fn write_parquet_archive(raw: &[RawRecord], data_type: &str) -> Result<(), anyhow::Error> {
     let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::Int32, false),
+        Field::new("id", DataType::Int64, false),
         Field::new("received", DataType::Utf8, false),
         Field::new("data_provider", DataType::Utf8, false),
         Field::new("data_type", DataType::Utf8, false),
@@ -94,7 +105,7 @@ fn write_parquet_archive(raw: &[RawRecord], data_type: &str) -> Result<(), anyho
         Field::new("raw_json", DataType::Utf8, false),
     ]));
 
-    let ids: Int32Array = raw.iter().map(|r| r.id).collect();
+    let ids: Int64Array = raw.iter().map(|r| r.id).collect();
     let received: StringArray = raw.iter().map(|r| Some(r.received.to_rfc3339())).collect();
     let providers: StringArray = raw.iter().map(|r| Some(r.data_provider.as_str())).collect();
     let data_types: StringArray = raw.iter().map(|_| Some(data_type)).collect();
@@ -135,7 +146,7 @@ async fn run_one_batch(pool: &PgPool, data_type: &str) -> Result<usize, anyhow::
         return Ok(0);
     }
 
-    let ids: Vec<i32> = raw.iter().map(|r| r.id).collect();
+    let ids: Vec<i64> = raw.iter().map(|r| r.id).collect();
 
     write_parquet_archive(&raw, data_type)?;
 
@@ -154,6 +165,14 @@ async fn run_one_batch(pool: &PgPool, data_type: &str) -> Result<usize, anyhow::
 /// Keeps calling run_one_batch until it comes back empty, so the whole backlog for this
 /// data_type is cleared in one call regardless of how large it's grown — not just one
 /// bounded chunk. Returns the total number of raw rows processed across every chunk.
+// TODO(v1.1.0 logging): this whole file uses bare `println!` (e.g. below and in run_all) rather
+// than SysLogger, so output only survives in the systemd journal - same blind spot feed_runner.rs
+// had before the logging pass (see docs/logging.md). Route through SysLogger, especially the `?`
+// failure paths on fetch_unprocessed/write_parquet_archive/insert which currently just propagate
+// and crash the process with no structured line at all.
+// TODO(v1.1.0 metrics): rows-processed-per-data_type is already computed here (`total`) but never
+// exported - this is a batch job though (see archive/r2.rs TODO), so needs Pushgateway or
+// log-based metrics rather than the daemon's pull-based REGISTRY.
 pub async fn run_for_data_type(pool: &PgPool, data_type: &str) -> Result<usize, anyhow::Error> {
     let mut total = 0;
     loop {
@@ -176,4 +195,39 @@ pub async fn run_all(pool: &PgPool) -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::array::Int32Array;
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+
+    /// Writes a one-column `id` Parquet file and reads its rows back through read_archive_id.
+    fn round_trip_ids(name: &str, data_type: DataType, ids: ArrayRef) -> Vec<i64> {
+        let path = std::env::temp_dir().join(format!("helixfeed-test-{}-{}.parquet", std::process::id(), name));
+        let schema = Arc::new(Schema::new(vec![Field::new("id", data_type, false)]));
+        let batch = RecordBatch::try_new(schema.clone(), vec![ids]).unwrap();
+        let mut writer = ArrowWriter::try_new(File::create(&path).unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+
+        let reader = SerializedFileReader::new(File::open(&path).unwrap()).unwrap();
+        let ids = reader.get_row_iter(None).unwrap().map(|row| read_archive_id(&row.unwrap()).unwrap()).collect();
+        std::fs::remove_file(&path).unwrap();
+        ids
+    }
+
+    #[test]
+    fn reads_new_int64_archive_ids_beyond_i32_range() {
+        let big = i64::from(i32::MAX) + 1;
+        let ids = round_trip_ids("int64", DataType::Int64, Arc::new(Int64Array::from(vec![1, big])));
+        assert_eq!(ids, vec![1, big]);
+    }
+
+    #[test]
+    fn reads_legacy_int32_archive_ids() {
+        let ids = round_trip_ids("int32", DataType::Int32, Arc::new(Int32Array::from(vec![7, i32::MAX])));
+        assert_eq!(ids, vec![7, i64::from(i32::MAX)]);
+    }
 }

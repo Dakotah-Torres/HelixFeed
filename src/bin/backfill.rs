@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use helix_feed::config::load_config;
-use helix_feed::normalizer::{book, orders, trades, RawRecord, PARQUET_ARCHIVE_STAGE};
+use helix_feed::normalizer::{book, orders, trades, read_archive_id, RawRecord, PARQUET_ARCHIVE_STAGE};
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::RowAccessor;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -75,7 +75,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
         for row_result in reader.get_row_iter(None)? {
             let row = row_result?;
-            let id = row.get_int(0)?;
+            let id = read_archive_id(&row)?;
             let received_str = row.get_string(1)?;
             let data_provider = row.get_string(2)?.clone();
             let row_data_type = row.get_string(3)?.clone();
@@ -106,6 +106,8 @@ async fn main() -> Result<(), anyhow::Error> {
         buffer.clear();
     }
 
+    // TODO(v1.1.0 logging): bare println! throughout this file - see the TODO in
+    // normalizer/mod.rs for the full note on routing batch jobs through SysLogger instead.
     println!(
         "backfill complete: {} '{}' rows written",
         total_written, data_type

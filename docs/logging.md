@@ -16,7 +16,8 @@ of sprinkled wherever's convenient.
   grep for e.g. `BTC/USD | Orders` and see only that pipeline's history. Use this for
   anything specific to one feed's lifecycle: connecting, disconnecting, message handling.
 - **`SysLogger`** (`src/logging/sys_logger.rs`) — one instance per system-level component
-  (currently "Kraken Raw Aggregator" and "Kraken Provider Setup"), writing to
+  ("Kraken Raw Aggregator" per pipeline, "Kraken Provider Setup", "Feed Runner", and
+  "R2 Archiver" in the archive job), writing to
   `log_config.system_log_location` (e.g. `logs/system.log`). Use this for anything that
   isn't tied to a single symbol/feed_type — provider-level setup failures, DB write
   failures for the aggregator task.
@@ -90,13 +91,17 @@ don't). Log points, in order of execution:
 1. **`"started"` / `"{X} Engine Starting: {symbols}"`** (`Info`) — first thing logged, before
    any network call. If you don't see this for a symbol/feed_type at all, the task never
    even spawned — check `raw_feed.rs` and `feed_runner.rs` instead.
-2. *(Orders only)* **`"API Key Unable to be retrieved: {e} - Ending process"`** (`Error`) —
-   the Kraken REST token fetch failed. This is a hard stop; the function returns and the
-   feed task is gone for good until the service restarts. Check the underlying error first
-   — usually a missing/bad `KRAKEN_API_KEY`/`KRAKEN_API_PRIVATE_KEY` env var or a network
-   failure hitting Kraken's REST API, not the WebSocket layer at all.
-3. *(Orders only)* **`"API CONNECTED | CONFIRMATION KEY: {hash}"`** (`Info`) — confirms a
-   token was obtained. Logs a SHA-256 hash of the token, never the token itself.
+2. *(Orders only, before **every** connect)* **`"WS token could not be retrieved: {e} -
+   attempt {n} out of {max}"`** (`Error`) — the Kraken REST token fetch failed. Counts as a
+   reconnect attempt: sleep `reconnect_delay_secs`, retry, and after `max_reconnect_attempts`
+   log **`"WS token could not be retrieved - Max Attempts reached Ending Connection"`** and
+   stop the feed. Check the underlying error first — usually a missing/bad
+   `KRAKEN_API_KEY`/`KRAKEN_API_PRIVATE_KEY` env var or a network failure hitting Kraken's
+   REST API, not the WebSocket layer at all. (Before 2026-10-06 the token was fetched once
+   at startup and reused on every reconnect, so it went stale after ~15 minutes.)
+3. *(Orders only, before **every** connect)* **`"API CONNECTED | CONFIRMATION KEY: {hash}"`**
+   (`Info`) — confirms a fresh token was obtained. Logs a SHA-256 hash of the token, never
+   the token itself. A different hash on each reconnect is expected.
 4. **`"Connected"`** (`Info`) — **new.** Logged immediately after `kraken_connect` succeeds.
    Previously there was no log between "Starting" and the first data message, so a slow or
    hanging connect attempt was indistinguishable from a dead one in the logs. Now you can
@@ -114,12 +119,11 @@ don't). Log points, in order of execution:
    frame..."` / `"WebSocket read error: {e}..."`** (`Warn`/`Error`) — see the table above.
    These all `break` out of the inner read loop and fall through to a fresh
    `kraken_connect` attempt at the top of the outer loop — none of them end the task.
-8. **`"{X}: receiver dropped, shutting down"`** (`Error`) — the `mpsc` channel to the
-   buffer/aggregator task is closed, meaning that consumer task has died (see
-   `raw_feed.rs` below). Breaks the inner loop the same as the cases above — the feed
-   *will* keep trying to reconnect to Kraken even though nothing is listening on the other
-   end anymore, which is a known gap (see **Gaps / future work**), not something this pass
-   fixed.
+8. **`"{X}: DB inserter is gone (receiver dropped) - stopping this feed instead of
+   reconnecting"`** (`Error`) — the `mpsc` channel to the inserter task is closed, meaning
+   that task has exited (shutdown, or a panic). The feed **returns** — it does not
+   reconnect. (Before 2026-10-06 this was a `break`, which sent the feed into an endless
+   reconnect loop against Kraken with nobody listening.)
 
 Non-text WebSocket frames (`Ping`/`Pong`/`Binary`/raw `Frame`) are deliberately **not**
 logged — they prove the connection is alive but carry no diagnostic information, and Ping
@@ -139,32 +143,33 @@ frames in particular can be frequent enough to become noise on their own.
   buffer pipeline" — if a feed's log shows normal "Connected" / reconnect activity but its
   swap lines stop appearing, the WS layer is fine and the problem is downstream.
 
-### `src/data_feeds/kraken/raw_feed.rs` — the DB-inserter task spawned per symbol/feed_type
+### `src/db/inserter.rs` — the DB-inserter task spawned per symbol/feed_type
 
-This task drains the `mpsc` channel the WS feed task sends messages into, pushes them
-through `DoubleBuffer`, and on a swap, converts + inserts the batch into Postgres. It uses
-`SysLogger`, not `FeedLogger` — these are DB/system-level failures, not feed-protocol ones.
+`Inserter::run` drains the `mpsc` channel the WS feed task sends messages into, pushes them
+through `DoubleBuffer`, and writes batches to Postgres on a swap, every 5 s, on shutdown, and
+when the feed closes. It uses `SysLogger` (component "Kraken Raw Aggregator"), not
+`FeedLogger` — these are DB/system-level events, not feed-protocol ones. Every line is
+prefixed `Kraken Raw Feed Aggregator ({provider} {symbol} {feed_type})`.
 
-- **`"... failed to convert a batch of {N} raw rows: {e} - this inserter is now
-  permanently stopped until the service restarts"`** (`Error`) — `serde_json` failed to
-  parse a buffered message as JSON. Fires `break`, which ends this symbol/feed_type's
-  inserter task for good. The consequence is spelled out explicitly now because the
-  original message ("failed to convert raw data to row") didn't say this was permanent —
-  it read like a one-off, recoverable error, when it actually kills the pipeline for that
-  symbol/feed_type silently. **The WS feed keeps running and buffering after this** — it
-  just has nowhere to send flushed batches anymore, so buffered data past this point is
-  lost until restart.
-- **`"... failed to insert a batch of {N} rows to DB: {e} - this inserter is now
-  permanently stopped until the service restarts"`** (`Error`) — same permanence, but the
-  batch parsed fine and the Postgres write itself failed (connection pool exhausted, DB
-  down, schema mismatch, etc.). Same consequence as above.
-- **`"... feed channel closed (WS task exited) - DB inserter shutting down"`** (`Warn`) —
-  **new.** Previously, when the WS feed task's `tx` sender was dropped (feed hit its
-  reconnect ceiling, panicked, or the API token fetch failed), this inserter task's `while
-  let Some(msg) = rx_feed.recv().await` loop just... ended. No log at all. The task quietly
-  vanished. This line makes that visible — if you see this without a matching "Max
-  Attempts reached" or similar in `kraken.log` for the same symbol/feed_type, check for a
-  panic in `system.log` or the systemd journal instead.
+**None of these stop the inserter** (that was the pre-2026-10-06 behaviour — a single
+failed insert used to end it permanently).
+
+- **`"… insert of {N} rows failed (attempt {n} of {max}): {e} - retrying in {delay}"`**
+  (`Warn`) — a batch insert failed; it will be retried with exponential backoff (1 s → 30 s
+  cap, 8 attempts by default). A burst of these that ends without the line below means the
+  DB recovered and nothing was lost.
+- **`"… gave up inserting a batch of {N} rows after {max} attempts: {e} - batch dropped,
+  inserter continues"`** (`Error`) — retries exhausted; **those {N} rows are lost**. The
+  next batch is tried normally. This is the line to alert on for data loss.
+- **`"… failed to convert a batch of {N} raw rows: {e} - batch dropped, inserter
+  continues"`** (`Error`) — a buffered message wasn't valid JSON. Practically unreachable
+  (the feed already parsed it to check `channel`), but if it fires that batch is lost.
+- **`"…: feed channel closed (WS task exited) - DB inserter shutting down"`** (`Warn`) — the
+  WS task's sender was dropped (it hit its reconnect ceiling or panicked). The buffer is
+  flushed first. Look for the matching "Max Attempts reached" in `kraken.log`; if there
+  isn't one, check the systemd journal for a panic.
+- **`"…: shutdown requested - remaining buffer flushed, DB inserter stopped"`** (`Info`) —
+  normal on every `systemctl stop/restart`. One per pipeline.
 
 ### `src/runners/feed_runner.rs` — provider-level setup
 
@@ -176,6 +181,11 @@ through `DoubleBuffer`, and on a swap, converts + inserts the batch into Postgre
   of just grepping the usual log file. There's a stderr fallback (`eprintln!`) if
   `SysLogger::new` itself can't open `system.log`, so the failure is never fully silent
   either way.
+- **`"Shutdown signal received - flushing {N} DB inserters"`** (`Info`, "Feed Runner") —
+  SIGTERM or Ctrl-C arrived.
+- **`"All DB inserters flushed - exiting"`** (`Info`) — clean shutdown, nothing buffered was
+  lost. If instead you see **`"DB inserters did not finish flushing within 30s - exiting
+  anyway, unflushed rows lost"`** (`Error`), the DB was too slow/unavailable at shutdown.
 - **`"Unknown provider configured: {name} - no feed started for it"`** (stderr, via
   `eprintln!`) — a provider in `helix_config.yml` isn't `kraken` (the only implemented one
   right now). `validate_config` should already reject this before `feed_runner` ever runs,
@@ -190,11 +200,11 @@ Things this pass deliberately did **not** fix, so they don't get lost:
 - **No log rotation.** Both loggers append forever via `OpenOptions::append(true)`. On a
   server that's been up a long time, `kraken.log` will keep growing unbounded. Worth a
   `logrotate` config or a size-based rotation in `FeedLogger`/`SysLogger` at some point.
-- **A dead consumer doesn't stop the WS feed from reconnecting.** If the DB-inserter task
-  dies (see `raw_feed.rs` above) but the WS feed task is still healthy, the feed will keep
-  reconnecting to Kraken and buffering forever with nowhere for swapped buffers to go.
-  Logging now makes this visible (both sides log their half independently), but the
-  reconnect loop itself doesn't check whether anyone's still listening.
+- ~~**A dead consumer doesn't stop the WS feed from reconnecting.**~~ Fixed 2026-10-06: the
+  feed now returns when its receiver is dropped, and the inserter no longer dies on a failed
+  insert in the first place.
+- **Batch jobs log to stdout.** `normalize` and `backfill` use `println!`, so their output
+  only exists in the systemd journal (`journalctl -u helixfeed-normalize`).
 - **No metrics wired up.** `src/metrics/prometheus.rs` already defines `FEEDS_RUNNING`,
   `TOTAL_MESSAGES`, `BUFFER_SWAPS_TOTAL`, `RECONNECT_ATTEMPTS_TOTAL`, and `FEED_UP`, and
   they're registered and served on `:9091/metrics` — but nothing in the codebase actually

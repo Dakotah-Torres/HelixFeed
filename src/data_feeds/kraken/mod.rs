@@ -1,6 +1,8 @@
 pub mod feeds;
 pub mod raw_feed;
 pub mod connection;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use std::sync::{Arc, Mutex}; 
 use crate::logging::feed_logger::FeedLogger; 

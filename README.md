@@ -4,7 +4,9 @@
 
 A Rust market data ingestion engine that connects to exchange WebSocket feeds, buffers incoming messages, and persists raw data to PostgreSQL — built as the data backbone for a personal quantitative trading research stack.
 
-HelixFeed is the ingestion layer for a larger system: it captures raw tick/trade/book data from exchanges, stores it durably, and hands off normalized data for downstream analysis (indicator calculation, backtesting) via a companion Rust crate, `qasm_core`.
+HelixFeed is the ingestion layer for a larger system: it captures raw tick/trade/book data from exchanges, stores it durably, normalizes it into typed tables, and archives the raw history to Cloudflare R2 as Parquet for downstream analysis (indicator calculation, backtesting).
+
+📚 **Full documentation lives in [`docs/`](docs/README.md)** — architecture, data lifecycle, module reference, runtime behaviour, configuration, database, operations, a change guide, and testing.
 
 ---
 
@@ -17,6 +19,8 @@ HelixFeed is the ingestion layer for a larger system: it captures raw tick/trade
 - **Runs** every symbol/feed-type combination as its own isolated Tokio task, so one feed erroring or reconnecting doesn't take down the others.
 
 ## Architecture
+
+> Simplified view of the ingestion daemon. The full picture (four binaries, normalization, R2 archiving) is in [docs/architecture.md](docs/architecture.md).
 
 ```
                  ┌────────────────────────────┐
@@ -70,11 +74,16 @@ Prometheus metrics server runs alongside, scraping feed/task health.
 - [x] Prometheus metrics server (feed health, message counts, reconnects, buffer swaps)
 - [x] Self-hosted CI: `cargo build --release` on push to `main`
 
+- [x] Order feed (`level3`) wired end to end, with a fresh auth token on every reconnect
+- [x] Reconnect with configurable delay/attempts, plus stale-connection detection (60 s of silence)
+- [x] DB writes retried with backoff; partial buffers flushed every 5 s and on graceful shutdown (SIGTERM)
+- [x] Hourly normalization (raw → typed `*_normalized` tables + Parquet snapshot)
+- [x] Hourly R2 cold-storage archival with retry/corrupt handling
+
 **In progress / scaffolded**
-- [ ] Order feed (`level3`) — defined in config/traits but not yet wired into the Kraken raw feed dispatcher
-- [ ] Reconnect/backoff logic — config supports `reconnect_delay_secs` / `max_reconnect_attempts`, connector-level retry handling still in progress
+- [ ] Prometheus metrics are registered and served but not yet incremented
 - [ ] Additional providers — config validates against `kraken` and `databento`, only Kraken is implemented
-- [ ] R2 cold-storage archival (config schema exists, upload logic not yet built)
+- [ ] Book checksum validation / gap detection
 
 ## Tech Stack
 
@@ -85,15 +94,14 @@ Prometheus metrics server runs alongside, scraping feed/task health.
 - **Metrics:** `prometheus` + `hyper` (embedded metrics HTTP server)
 - **Config:** YAML (`serde_yaml`) with custom validation layer
 - **Auth:** HMAC-SHA512 request signing for Kraken's authenticated WebSocket token endpoint
-- **Companion crate:** `qasm_core` (local path dependency) — shared trade/book/candle data types used across the quant research stack
-- **CI/CD:** self-hosted GitHub Actions runner, builds on every push to `main`
+- **Archive:** Parquet (`arrow`/`parquet`) uploaded to Cloudflare R2 via `aws-sdk-s3`
+- **CI/CD:** self-hosted GitHub Actions runner, builds on a `v*.*.*` tag or a manual run
 
 ## Getting Started
 
 ### Prerequisites
 - Rust (stable, 2021 edition or later)
 - PostgreSQL instance
-- `qasm_core` crate available as a sibling directory (`../qasm_core`) — this is a workspace-local dependency, not published to crates.io
 - Kraken API key/secret if using authenticated feeds (order book L3)
 
 ### Setup
@@ -111,10 +119,12 @@ Create a `.env` file in the project root with:
 DB_USER=YOUR_DATABASE_USER_NAME
 DB_PASS=YOUR_DATABASE_PASSWORD
 KRAKEN_API_KEY=<your-key>
-KRAKEN_API_SECRET=<your-secret>
+KRAKEN_API_PRIVATE_KEY=<your-secret>
+R2_API_ACCESS_KEY=<r2-access-key>     # only for the archive job
+R2_API_SECRET_KEY=<r2-secret-key>
 ```
 
-Adjust `helix_config.yml` for your symbols, database, and log paths, then build and run:
+Copy `helix_config.example.yml` to `helix_config.yml` and adjust it for your symbols, database, and log paths (field reference: [docs/configuration.md](docs/configuration.md)). Apply the database migrations (see [docs/database.md](docs/database.md#migrations)), then build and run:
 
 ```bash
 cargo build --release
@@ -129,36 +139,41 @@ Prometheus metrics are served on the embedded HTTP server once the feed runner s
 cargo test
 ```
 
-Tests cover config validation (valid/invalid configs, missing fields, buffer bounds) and PostgreSQL integration (connection, migrations, batch insert correctness) — the latter requires a running Postgres instance and `DB_USER`/`DB_PASS` in `.env`.
+Most tests run offline (a fake Kraken WebSocket server and an in-memory DB sink). The PostgreSQL integration tests require a running Postgres instance and `DB_USER`/`DB_PASS` in `.env`. See [docs/testing.md](docs/testing.md).
 
 ### Deploying
 
-`deploy.sh` runs `cargo check`, commits the working `dev` branch, merges into `main`, and pushes — which then triggers the self-hosted GitHub Actions workflow to build the release binary on the quant server.
+`deploy.sh` runs `cargo check`, commits the working `dev` branch, merges into `main`, and pushes. Pushing a `v*.*.*` tag (or running the workflow manually) triggers the self-hosted GitHub Actions workflow that builds the release binaries on the quant server and restarts the services. Details and a release checklist: [docs/operations.md](docs/operations.md).
 
 ## Project Structure
 
 ```
 HelixFeed/
 ├── src/
-│   ├── main.rs                        # Entry point — starts the feed runner
-│   ├── runners/feed_runner.rs         # Loads config, spawns provider tasks + DB sink
-│   ├── config/mod.rs                  # Config structs, YAML loading, validation
+│   ├── main.rs                         # helix_feed daemon entry point
+│   ├── bin/                            # normalize.rs, archive.rs, backfill.rs (batch jobs)
+│   ├── runners/feed_runner.rs          # daemon setup, pipeline spawning, graceful shutdown
+│   ├── config/mod.rs                   # config structs, YAML loading, validation
 │   ├── data_feeds/
-│   │   ├── traits.rs                  # DataProvider / feed trait definitions
+│   │   ├── traits.rs                   # provider traits (scaffolding for the registry)
 │   │   └── kraken/
-│   │       ├── connection/connector.rs # WebSocket connect + Kraken auth (HMAC signing)
-│   │       ├── raw_feed.rs             # Per-symbol task spawning + buffer wiring
+│   │       ├── connection/connector.rs # WS connect + Kraken REST token (HMAC signing)
+│   │       ├── raw_feed.rs             # builds one pipeline per symbol/feed type
 │   │       └── feeds/                  # trades.rs, book.rs, orders.rs
 │   ├── db/
-│   │   ├── buffer.rs                   # DoubleBuffer — active/standby swap on capacity
-│   │   └── postgresql.rs               # PgPool, batched raw inserts, migrations
-│   ├── metrics/prometheus.rs           # Prometheus registry + embedded metrics server
-│   ├── logging/                        # Feed-level and system-level logging
-│   └── ingest/                         # Ingestion pipeline glue
-├── migrations/                         # sqlx PostgreSQL migrations (raw storage schema)
-├── helix_config.yml                    # Example provider/symbol/database configuration
+│   │   ├── buffer.rs                   # DoubleBuffer
+│   │   ├── inserter.rs                 # per-pipeline DB writer: retry, timed + shutdown flush
+│   │   └── postgresql.rs               # PgPool, batched UNNEST raw inserts
+│   ├── normalizer/                     # raw → Parquet + typed tables
+│   ├── archive/r2.rs                   # Parquet → Cloudflare R2
+│   ├── metrics/prometheus.rs           # Prometheus registry + :9091 server
+│   └── logging/                        # FeedLogger + SysLogger
+├── migrations/                         # sqlx PostgreSQL migrations
+├── deploy/                             # systemd unit + timer templates
+├── docs/                               # full documentation
+├── helix_config.example.yml            # config template
 ├── deploy.sh                           # cargo check → commit → merge dev→main → push
-└── .github/workflows/deploy.yml        # Self-hosted CI: cargo build --release on push
+└── .github/workflows/deploy.yml        # self-hosted CI build + service restart
 ```
 
 ## Design Notes
@@ -170,10 +185,7 @@ A few architecture decisions worth calling out:
 
 ## Roadmap
 
-- Wire up the order book (L3) feed end-to-end
-- Add reconnect/backoff handling at the connector level
-- Add a second data provider (Databento is already validated in config)
-- R2 cold-storage archival for raw data
+See [docs/roadmap.md](docs/roadmap.md). Next up: the provider abstraction (M4), book checksum/gap detection (M5), Grafana dashboards (M6), and a second provider (M7).
 
 ## Why This Project
 

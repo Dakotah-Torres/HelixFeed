@@ -5,36 +5,48 @@ use crate::data_feeds::kraken::feeds::trades::kraken_trade_data_feed;
 use crate::logging::feed_logger::FeedLogger;
 use crate::logging::feed_logger::LoggerContext;
 use crate::logging::sys_logger::SysLogger;
-use crate::logging::LogType;
 
 use crate::config::FeedType;
 use crate::config::ProviderConfig; 
 use crate::config::LogConfig;
 
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use std::time::Duration;
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 
 use crate::db::buffer::DoubleBuffer;
-use crate::db::postgresql::{PostgresDBRaw, RawRow};
+use crate::db::inserter::{Inserter, RetryPolicy};
+use crate::db::postgresql::PostgresDBRaw;
+
+/// How often a partially-filled buffer gets written even if it never hits the swap trigger.
+const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 
 
 //This function is meant to allow you to call one function it then initiates a mpsc channel. This will be used to pass the tx to the the provided feed type
 // once it is determined what feed type is being created then this spans a new double buffer instance 
-pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfig,  db: PostgresDBRaw, buffer_capacity: usize, buffer_trigger: f32 ) -> Result<(), anyhow::Error>{
-    
+//
+// Returns the JoinHandle of every DB inserter task it spawned, so feed_runner can tell them
+// to flush on shutdown and wait for them to finish before the process exits.
+pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfig,  db: PostgresDBRaw, buffer_capacity: usize, buffer_trigger: f32, shutdown: watch::Receiver<bool>) -> Result<Vec<JoinHandle<()>>, anyhow::Error>{
+    let mut inserters = Vec::new();
+
     for symbol in provider_conf.symbol_feeds {
-        let (tx_feed, mut rx_feed) = mpsc::channel::<String>(buffer_capacity);
+        let (tx_feed, rx_feed) = mpsc::channel::<String>(buffer_capacity);
         let symbols = vec![symbol.symbol.clone()];
         
         let symbol_name = symbol.symbol.clone();
         let provider_name = provider_conf.provider.clone();
         let log = Arc::new(Mutex::new(FeedLogger::new(log_conf.feed_log_location.clone(), provider_name.clone())?));
-        let mut sys_log = SysLogger::new(log_conf.system_log_location.clone(), "Kraken Raw Aggregator".to_string())?;
+        let sys_log = SysLogger::new(log_conf.system_log_location.clone(), "Kraken Raw Aggregator".to_string())?;
         let log_ctx = LoggerContext::new(symbol_name.clone(), symbol.feed_type);
         
 
         let sym_db = db.clone();
 
+        // TODO(v1.1.0 metrics): FEEDS_RUNNING.inc() when each of the tokio::spawn calls below
+        // fires, .dec() when that task's loop returns for good (max reconnect attempts hit,
+        // receiver dropped, etc.) - no single spot today, needs wrapping each spawned future.
         match symbol.feed_type {
             FeedType::Trades => {
                 let log = Arc::clone(&log);
@@ -61,46 +73,18 @@ pub fn kraken_raw_feed_channel(provider_conf: ProviderConfig, log_conf: LogConfi
 
         }
 
-        tokio::spawn(async move {
-                let dub_buffer: DoubleBuffer = DoubleBuffer::new(buffer_capacity, buffer_trigger);
-                while let Some(msg) = rx_feed.recv().await {
-                    let swap_result = {
-                        let mut log = log.lock().unwrap();
-                        dub_buffer.buffer_push_and_swap(msg, provider_name.clone() ,symbol.clone(), &mut log, &log_ctx)
-                    };
-
-                    if let Ok(Some(buff)) = swap_result {
-                        let batch_size = buff.get_messages().len();
-                        let raw_data = match RawRow::data_buff_to_rawrows(buff) {
-                            Ok(raw_data) => raw_data,
-                            Err(e) => {
-                                // This kills the loop below, which permanently ends this
-                                // symbol/feed_type's DB inserter task - the WS feed keeps
-                                // running and buffering normally, but nothing gets written
-                                // to Postgres again until the service is restarted. That
-                                // consequence isn't obvious from "failed to convert" alone,
-                                // so it's spelled out here rather than left implicit.
-                                sys_log.sys_log(LogType::Error, &format!("Kraken Raw Feed Aggregator ({} {}) failed to convert a batch of {} raw rows: {} - this inserter is now permanently stopped until the service restarts", provider_name, symbol_name, batch_size, e));
-                                break
-                            }
-                        };
-                        match sym_db.insert_raw_data_batch(raw_data).await{
-                            Ok(()) => (),
-                            Err(e)=> {
-                                sys_log.sys_log(LogType::Error, &format!("Kraken Raw Feed Aggregator ({} {}) failed to insert a batch of {} rows to DB: {} - this inserter is now permanently stopped until the service restarts", provider_name, symbol_name, batch_size, e));
-                                break
-                            }
-                        };
-                    }
-                }
-                // recv() only returns None once every sender is dropped - here that means
-                // the WS feed task for this symbol/feed_type exited (panicked, hit its
-                // reconnect-attempt ceiling, or an API-token failure) without this task
-                // knowing why. Whatever the WS-side log says is the real cause; this line
-                // just makes sure "the DB inserter went quiet too" shows up in system.log
-                // rather than the task just vanishing with no trace.
-                sys_log.sys_log(LogType::Warn, &format!("Kraken Raw Feed Aggregator ({} {}): feed channel closed (WS task exited) - DB inserter shutting down", provider_name, symbol_name));
-            });
+        let inserter = Inserter {
+            sink: sym_db,
+            buffer: DoubleBuffer::new(buffer_capacity, buffer_trigger),
+            provider_name,
+            symbol,
+            feed_log: log,
+            log_ctx,
+            sys_log,
+            flush_interval: FLUSH_INTERVAL,
+            retry: RetryPolicy::default(),
+        };
+        inserters.push(tokio::spawn(inserter.run(rx_feed, shutdown.clone())));
     }
-    Ok(())
+    Ok(inserters)
 }

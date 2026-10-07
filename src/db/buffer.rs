@@ -119,6 +119,7 @@ impl DoubleBuffer {
 
         if inner_store.active.trigger_swap() {
             let flushed_count = inner_store.active.capacity_check();
+            // TODO(v1.1.0 metrics): BUFFER_SWAPS_TOTAL{provider,symbol,feed_type}.inc() here
             logger.feed_log(LogType::Info, &format!("Buffer swap triggered - flushing {} messages to the DB inserter", flushed_count), ctx);
             std::mem::swap(&mut inner_store.active, &mut inner_store.standby);
 
@@ -130,5 +131,19 @@ impl DoubleBuffer {
         else {
             Ok(None)
         }
+    }
+
+    /// Hands back whatever is sitting in the active buffer right now, even if it never hit
+    /// the swap trigger. Used for the time-based flush (so a quiet symbol doesn't hold rows in
+    /// memory for hours) and on shutdown (so a restart doesn't throw away a half-full buffer).
+    /// Returns None when there's nothing to flush.
+    pub fn take_partial(&self) -> Option<DataBuffer> {
+        let mut store = self.inner_store.lock().unwrap();
+        if store.active.messages.is_empty() {
+            return None;
+        }
+        let capacity = store.active.capacity;
+        let trigger = store.active.cap_trigger;
+        Some(std::mem::replace(&mut store.active, DataBuffer::new(capacity, trigger)))
     }
 }

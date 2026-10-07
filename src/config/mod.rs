@@ -262,6 +262,6 @@ mod tests {
         let mut config = valid_config();
         config.providers[0].max_reconnect_attempts = 0;
         let err = validate_config(&config).unwrap_err();
-        assert!(err.to_string().contains("feed_log_location must not be empty"));
+        assert!(err.to_string().contains("max_reconnect_attempts must be greater than 0"));
     }
 }

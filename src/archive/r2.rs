@@ -54,6 +54,14 @@ impl R2Archiver {
         Ok(entires.filter_map(|entry| entry.ok().map(|e| e.path())))
     }
 
+    /// Only the `.parquet` archives in `dir`. The failed/ folder also holds a `<name>.attempts`
+    /// retry-counter sidecar next to each file - iterating every entry used to upload those
+    /// sidecars to R2 as if they were data and then delete them, which reset the retry count
+    /// so a bad file could never reach max_upload_attempts and get moved to corrupt/.
+    pub fn list_parquet_files(dir: &str) -> Result<impl Iterator<Item = PathBuf>, anyhow::Error> {
+        Ok(Self::list_files(dir)?.filter(|path| path.extension().is_some_and(|ext| ext == "parquet")))
+    }
+
     pub fn get_file_prefix(file_path: &Path) -> Result<String, anyhow::Error> {
         let file = file_path.file_name().ok_or_else(|| anyhow::anyhow!("filename '{}' has no prefix", file_path.display()))?;
         let file_str = file.to_str().ok_or_else(|| anyhow::anyhow!("File '{}' Cannot be Converted to string", file.to_string_lossy()))?;
@@ -125,10 +133,15 @@ impl R2Archiver {
 
     
 
+    // TODO(v1.1.0 metrics): helix_archive_uploads_total{result="ok"|"failed"|"corrupt"} counter
+    // around the match arms below - every branch is already logged individually via SysLogger,
+    // just not counted. Note this runs as a short-lived systemd-timer process, not the
+    // long-running daemon, so it exits before ever hitting a Prometheus scrape on :9091 - needs
+    // either a Pushgateway or log-based metrics instead of the pull-based REGISTRY pattern.
     pub async fn archiver(&mut self) -> Result<(), anyhow::Error> {
         //Checking failed folder first
 
-        for file in Self::list_files(PARQUET_ARCHIVE_FAILD)? {
+        for file in Self::list_parquet_files(PARQUET_ARCHIVE_FAILD)? {
             let file_path: &Path  = file.as_path();
             let prefix = Self::get_file_prefix(&file_path)?;
             match self.r2_archiver(&file_path, prefix).await{
@@ -177,7 +190,7 @@ impl R2Archiver {
 
         };
 
-        for file in Self::list_files(PARQUET_ARCHIVE_READY)? {
+        for file in Self::list_parquet_files(PARQUET_ARCHIVE_READY)? {
             let file_path: &Path  = file.as_path();
             let prefix = Self::get_file_prefix(&file_path)?;
             match self.r2_archiver(&file_path, prefix).await {  
@@ -218,4 +231,21 @@ impl R2Archiver {
 
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn list_parquet_files_skips_attempt_sidecars() {
+        let dir = std::env::temp_dir().join(format!("helixfeed-test-archive-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["trades_20261006T000000Z.parquet", "trades_20261006T000000Z.attempts", "notes.txt"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+
+        let files: Vec<PathBuf> = R2Archiver::list_parquet_files(dir.to_str().unwrap()).unwrap().collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(files, vec![dir.join("trades_20261006T000000Z.parquet")]);
+    }
+}
