@@ -5,6 +5,7 @@ use crate::data_feeds::kraken::raw_feed::kraken_raw_feed_channel;
 use crate::db::postgresql::PostgresDBRaw;
 use crate::logging::sys_logger::SysLogger;
 use crate::logging::LogType;
+use crate::health::{pipelines_from_config, HealthPoller};
 
 use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
@@ -23,6 +24,14 @@ pub async fn feed_runner(config: &str) -> Result<(), anyhow::Error> {
     println!("Config valid — starting feeds");
 
     let conn = PostgresDBRaw::new(&config.database_conf.postgres_config).await?;
+
+    // Captured here because the provider loop below moves `config.providers`. Not joined on
+    // shutdown - like the metrics server it holds nothing that needs flushing.
+    let pipelines = pipelines_from_config(&config.providers);
+    match HealthPoller::new(conn.clone(), pipelines, &config.log_config) {
+        Ok(poller) => { tokio::spawn(poller.run()); }
+        Err(e) => eprintln!("Health poller not started - could not open system log: {e}"),
+    }
 
     // Flipped to true once on SIGTERM/SIGINT - every inserter watches it and flushes.
     let (shutdown_tx, shutdown_rx) = watch::channel(false);

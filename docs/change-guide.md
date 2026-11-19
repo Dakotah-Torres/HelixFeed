@@ -156,8 +156,9 @@ Everything that reads or writes raw rows changes together:
 
 ## 7. Wire up a Prometheus metric
 
-All five metrics exist in [prometheus.rs](../src/metrics/prometheus.rs), and every call
-site is marked `TODO(v1.1.0 metrics)`. Find them with:
+The unwired metrics exist in [prometheus.rs](../src/metrics/prometheus.rs), and every call
+site is marked `TODO(v1.1.0 metrics)`. (The health metrics are already set by
+[health/mod.rs](../src/health/mod.rs); leave `FEED_UP` to it.) Find them with:
 
 ```bash
 grep -rn "TODO(v1.1.0 metrics)" src
@@ -175,7 +176,9 @@ TOTAL_MESSAGES
 The feed functions don't receive the provider name today, which is why `"kraken"` is
 hard-coded above. That's fine inside the Kraken module; pass it in if you want it generic. A new metric means: define it in the `lazy_static!`
 block, then register it in `register_metrics()`. Check with `curl localhost:9091/metrics`.
-Batch jobs (normalize/archive) exit before any scrape, so they need a Pushgateway instead.
+Batch jobs (normalize/archive) exit before any scrape. Either use a Pushgateway, or do what
+`archive` does: write a small status file at the end of the run and let the health poller
+publish it (see [archive/status.rs](../src/archive/status.rs)).
 
 ## 8. Change where Parquet files go
 

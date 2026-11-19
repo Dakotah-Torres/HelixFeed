@@ -32,6 +32,8 @@ flowchart TD
     SLOG["logging/sys_logger.rs"]
     LOGT["logging/mod.rs (LogType)"]
     MET["metrics/prometheus.rs"]
+    HP["health/mod.rs"]
+    AST["archive/status.rs"]
     NORM["normalizer/mod.rs"]
     NT["normalizer/trades.rs<br/>book.rs · orders.rs"]
     R2["archive/r2.rs"]
@@ -39,7 +41,8 @@ flowchart TD
     FMOD["feeds/mod.rs<br/>(FEED_REGISTRY)"]:::dead
 
     MAIN --> FR
-    FR --> CFG & RF & PGM & SLOG & MET
+    FR --> CFG & RF & PGM & SLOG & MET & HP
+    HP --> CFG & PGM & SLOG & MET & AST
     RF --> TR & BK & OR & INS & BUF & PGM & FLOG & SLOG & CFG
     TR & BK & OR --> CONN & FLOG & CFG
     CONN --> CFG & TRAITS
@@ -52,8 +55,8 @@ flowchart TD
     BNORM --> CFG & NORM
     BBACK --> CFG & NORM & NT
     NORM --> NT
-    BARCH --> CFG & R2 & SLOG
-    R2 --> CFG & SLOG
+    BARCH --> CFG & R2 & SLOG & AST
+    R2 --> CFG & SLOG & AST
     FMOD --> CFG & TRAITS
 ```
 
@@ -79,11 +82,11 @@ Top-level orchestration of the daemon.
 
 | Item | What it does |
 |---|---|
-| `feed_runner(path)` | metrics → load + validate config → one `PostgresDBRaw` → shutdown `watch` channel → per-provider setup → wait for signal → flush and join inserters |
+| `feed_runner(path)` | metrics → load + validate config → one `PostgresDBRaw` → spawn the health poller → shutdown `watch` channel → per-provider setup → wait for signal → flush and join inserters |
 | `wait_for_shutdown_signal()` | resolves on SIGINT (Ctrl-C) **or** SIGTERM (systemd stop) |
 | `SHUTDOWN_FLUSH_TIMEOUT` | 30 s, the most time inserters get to flush on shutdown |
 
-**Depends on:** config, `kraken_raw_feed_channel`, `PostgresDBRaw`, `SysLogger`, metrics.
+**Depends on:** config, `kraken_raw_feed_channel`, `PostgresDBRaw`, `SysLogger`, metrics, `HealthPoller`.
 **Used by:** `main.rs` only.
 **Change here when:** adding a provider (the `match provider.provider.as_str()`), changing
 startup or shutdown order.
@@ -172,15 +175,31 @@ The mutex is never contended: only the inserter task touches the buffer.
 | `PostgresDBRaw::new(&PostgresConfig)` | `PgPool`, max 20 connections, URL built with `format!` (⚠️ password isn't URL-escaped) |
 | `PostgresDBRaw::new_with_migration` | same, then runs `sqlx::migrate!("./migrations")`. **Only tests call this.** The daemon doesn't run migrations. |
 | `insert_raw_data_batch(&[RawRow])` | one `INSERT … SELECT * FROM UNNEST(…)` |
+| `last_received_per_pipeline()` | newest `received` per (provider, symbol, data_type) among the latest 250k rows. Used by the health poller. |
 | `impl RawSink for PostgresDBRaw` | adapter for the inserter |
 
 ### [src/metrics/prometheus.rs](../src/metrics/prometheus.rs)
-Static `REGISTRY` plus five metrics (`helix_feeds_running`, `helix_messages_total`,
-`helix_buffer_swaps_total`, `helix_reconnect_attempts_total`, `helix_feed_up`).
-`start_metrics_server()` serves them on `0.0.0.0:9091`, any path.
-⚠️ Nothing updates these metrics. The `TODO(v1.1.0 metrics)` comments mark where each
-one belongs. ⚠️ `register_metrics()` panics if called twice, and the server panics if
-port 9091 is already taken.
+Static `REGISTRY` plus every metric, served by `start_metrics_server()` on
+`0.0.0.0:9091`, any path. The health metrics (`helix_feed_up`,
+`helix_feed_last_received_timestamp_seconds`, `helix_archive_last_run_*`,
+`helix_systemd_unit_active`) are set by the health poller. ⚠️ `helix_feeds_running`,
+`helix_messages_total`, `helix_buffer_swaps_total` and `helix_reconnect_attempts_total` are
+never updated yet; the `TODO(v1.1.0 metrics)` comments mark where each belongs.
+⚠️ `register_metrics()` panics if called twice, and the server panics if port 9091 is
+already taken.
+
+### [src/health/mod.rs](../src/health/mod.rs)
+`HealthPoller`: one task in the daemon that checks every 30 s whether data is really
+landing, and publishes the result. Full description in [monitoring.md](monitoring.md).
+
+| Item | Notes |
+|---|---|
+| `pipelines_from_config(&[ProviderConfig])` | one `PipelineKey` per configured pipeline. Must run before `feed_runner`'s provider loop moves `config.providers`. |
+| `HealthPoller::new(db, pipelines, &LogConfig)` / `run(self)` | sleeps first, then each tick: feed freshness, archive status file, `systemctl show` for each timer. Logs only on state changes. |
+| `STALE_THRESHOLD_SECS`, `HEALTH_POLL_INTERVAL`, `MONITORED_UNITS` | 300 s, 30 s, the normalize and archive timers |
+
+**Depends on:** `PostgresDBRaw`, `archive::status`, `SysLogger`, metrics, config.
+**Used by:** `feed_runner`.
 
 ### [src/logging/](../src/logging/)
 | File | Item | Notes |
@@ -227,7 +246,10 @@ CLI `backfill <trades|book|orders>`. It reads `staging/<type>_*.parquet` in chun
 
 ### [src/bin/archive.rs](../src/bin/archive.rs) → [src/archive/r2.rs](../src/archive/r2.rs)
 `archive` exits early if `database_conf.r2` is missing. It creates `failed/` and
-`corrupt/`, then runs `R2Archiver::archiver()`.
+`corrupt/`, runs `R2Archiver::archiver()`, then writes the outcome (success or failure) to
+`archive_status.json` next to `system.log` for the daemon's health poller
+([src/archive/status.rs](../src/archive/status.rs): `ArchiveRunSummary`,
+`ArchiveRunStatus`, `archive_status_path`).
 
 | Item | Notes |
 |---|---|
@@ -238,7 +260,7 @@ CLI `backfill <trades|book|orders>`. It reads `staging/<type>_*.parquet` in chun
 | `log_failed(name)` | read-increment-write the `.attempts` sidecar |
 | `corrupt_clean_up` | moves the file to `corrupt/` once attempts exceed `max_upload_attempts` |
 | `r2_archiver(path, folder)` | one `put_object` |
-| `archiver()` | `failed/` pass, then `ready/` pass |
+| `archiver()` | `failed/` pass, then `ready/` pass. Returns an `ArchiveRunSummary` (uploaded / failed / corrupt counts). |
 
 [src/archive/Docs/archiver_flow.mmd](../src/archive/Docs/archiver_flow.mmd) is the
 original **design sketch**. It differs from the code: the code reads `ready/`, not a
@@ -275,4 +297,4 @@ It compiles and is public, but nothing calls it. Safe to ignore while tracing be
 | `Market` enum values | `config/mod.rs` | parsed, never read (TODO there about a `market` column) |
 | `R2Config.upload_schedule` | config | validated, never used; the systemd timer decides the schedule |
 | `bincode`, `simd-json` crates | `Cargo.toml` | no imports |
-| All five Prometheus metrics | `prometheus.rs` | registered, never updated |
+| `FEEDS_RUNNING`, `TOTAL_MESSAGES`, `BUFFER_SWAPS_TOTAL`, `RECONNECT_ATTEMPTS_TOTAL` | `prometheus.rs` | registered, never updated (the health metrics are live) |

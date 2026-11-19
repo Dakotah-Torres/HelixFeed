@@ -6,3 +6,4 @@ pub mod logging;
 pub mod metrics;
 pub mod normalizer;
 pub mod archive;
+pub mod health;

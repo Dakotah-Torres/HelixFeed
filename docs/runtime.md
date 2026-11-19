@@ -12,6 +12,7 @@ With `P` pipelines (= number of `symbol_feeds` entries across all providers):
 | main / `feed_runner` | 1 | `#[tokio::main]` | shutdown signal + flush |
 | metrics server accept loop | 1 | `feed_runner` | process exit (or panic) |
 | metrics connection handler | 1 per HTTP connection | metrics server | that request ends |
+| health poller | 1 | `feed_runner` | process exit (not joined on shutdown: it buffers nothing) |
 | WS feed task | P | `raw_feed.rs` | `max_reconnect_attempts` consecutive failures, inserter gone, or process exit |
 | Inserter task | P | `raw_feed.rs` | feed closes, or shutdown signal |
 
@@ -44,7 +45,7 @@ can signal the feed is by dropping its receiver.
 | `DoubleBuffer.inner_store` | `std::sync::Mutex` | Inserter only | never |
 | `TOKEN_FETCH_LOCK` | `tokio::sync::Mutex<()>` (static) | `get_kraken_ws_token`, for the whole REST round-trip | **yes**, on purpose, which is why it's a tokio mutex |
 | `LAST_NONCE` | `AtomicU64` (static) | CAS loop in `next_nonce()` | n/a |
-| `PgPool` | internal `Arc`, max 20 connections | every inserter | a pool connection is held only during `execute` |
+| `PgPool` | internal `Arc`, max 20 connections | every inserter, plus the health poller (one query per 30 s) | a pool connection is held only during `execute` |
 | `REGISTRY` and metrics | `lazy_static`, internally synchronized | metrics server | n/a |
 
 `.lock().unwrap()` panics if the mutex is poisoned, which only happens if another holder
@@ -136,6 +137,7 @@ Anything Kraken sends between the flush and exit is lost, which is a few millise
 | `feed_runner` returns `Err` before the signal wait (bad config, PG unreachable at startup) | process exits non-zero | systemd `Restart=on-failure` after 5 s | everything restarts |
 | SIGKILL / OOM / power loss | in-flight buffers lost | systemd restarts it | all |
 
-⚠️ A pipeline that died (reached max attempts, or panicked) is only noticed through logs.
-Nothing restarts a single pipeline: only a full service restart brings it back, and
-`helix_feed_up` would show it if it were wired.
+⚠️ Nothing restarts a single pipeline that died (reached max attempts, or panicked): only
+a full service restart brings it back. It is noticed, though: within about 5½ minutes
+the health poller sets `helix_feed_up` to 0 for it and logs `… is DOWN` to `system.log`
+(see [monitoring.md](monitoring.md)).

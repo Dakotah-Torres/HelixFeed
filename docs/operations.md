@@ -1,6 +1,7 @@
 # Operations
 
-Deploying, running, and debugging HelixFeed on the quant server.
+Deploying, running, and debugging HelixFeed on the quant server. For the real server's actual paths, ports, current state and incident history, see
+[production.md](production.md).
 
 ## Deploy pipeline
 
@@ -115,9 +116,22 @@ What each log line means: [logging.md](logging.md).
 
 ## Metrics
 
-`curl localhost:9091/metrics` serves the Prometheus text format. ⚠️ Every value is 0 today
-(not wired yet). The port listens on all interfaces, so firewall it or change the bind to
-`127.0.0.1` if the server is reachable from outside.
+`curl localhost:9091/metrics` serves the Prometheus text format. Real values today come
+from the health poller: `helix_feed_up`, `helix_feed_last_received_timestamp_seconds`,
+`helix_archive_last_run_*` and `helix_systemd_unit_active`. What each one means, and PromQL
+to start from, is in [monitoring.md](monitoring.md).
+
+```bash
+curl -s localhost:9091/metrics | grep -E "^helix_(feed_up|archive|systemd)"
+```
+
+⚠️ `helix_messages_total`, `helix_buffer_swaps_total`, `helix_reconnect_attempts_total`
+and `helix_feeds_running` are still always 0 (their call sites are marked
+`TODO(v1.1.0 metrics)`).
+
+The port listens on all interfaces, so firewall it or change the bind to `127.0.0.1` if the
+server is reachable from outside. (A Prometheus server on another machine needs it open,
+so firewall it to just that machine.)
 
 ## Runbook
 
@@ -131,6 +145,8 @@ What each log line means: [logging.md](logging.md).
 | `raw_financial_data` keeps growing | `journalctl -u helixfeed-normalize` | normalizer failing every run, often a parse error on one row (see [data-lifecycle.md #9](data-lifecycle.md#where-data-can-be-lost-or-duplicated)) |
 | Files piling up in `parquet_archive/failed/` | `grep R2 logs/system.log` | R2 credentials, endpoint, or network |
 | Files in `parquet_archive/corrupt/` | the `.parquet` itself | exceeded `max_upload_attempts`; upload by hand once the cause is fixed |
+| `Health Poller … is DOWN` in system.log | `grep "<SYM> \| <Type>" logs/kraken.log \| tail` | same causes as "No new rows for a symbol" above; the poller only reports it |
+| `Health Poller … NOT active` for a timer | `systemctl list-timers --all 'helixfeed-*'` | timer was stopped or never enabled → `sudo systemctl enable --now <unit>` |
 | Service won't start | `journalctl -u helixfeed -n 50` | bad config (validation message), PG unreachable at startup, log directory missing |
 | `nextval: reached maximum value` | `SELECT last_value FROM raw_financial_data_id_seq` | the bigint migration hasn't been applied |
 

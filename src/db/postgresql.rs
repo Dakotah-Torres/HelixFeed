@@ -91,6 +91,31 @@ impl PostgresDBRaw {
 
         Ok(())
     }
+
+    /// Newest `received` per (provider, symbol, data_type), looking only at the latest 250k
+    /// rows. raw_financial_data has no index but its primary key, so a GROUP BY over the whole
+    /// table would read every row (100+ GB with the normalizer off); walking the id index
+    /// backwards with a LIMIT stays cheap however big the backlog gets. 250k rows is ~15 min
+    /// at the ~270 msg/s measured on 2026-10-09, comfortably over the health poller's 5-minute
+    /// threshold. A pipeline with nothing in that window is simply absent from the result.
+    pub async fn last_received_per_pipeline(&self) -> Result<Vec<(String, String, String, DateTime<Utc>)>, anyhow::Error> {
+        let query = "
+            SELECT data_provider, symbol, data_type, max(received)
+            FROM (
+                SELECT data_provider, symbol, data_type, received
+                FROM raw_financial_data
+                ORDER BY id DESC
+                LIMIT 250000
+            ) recent
+            GROUP BY data_provider, symbol, data_type
+        ";
+
+        let rows = sqlx::query_as(query)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows)
+    }
 }
 
 impl RawSink for PostgresDBRaw {
@@ -214,8 +239,49 @@ mod test {
 
     }
 
+    #[tokio::test]
+    async fn test_last_received_per_pipeline() -> Result<(), anyhow::Error> {
+        dotenvy::dotenv().ok();
+        let db_user = std::env::var("DB_USER").unwrap();
+        let db_pass = std::env::var("DB_PASS").unwrap();
+        let postgres_config = PostgresConfig {
+            host: "localhost".to_string(),
+            port: "5432".to_string(),
+            database: "helixfeed_dev".to_string(),
+            user: db_user,
+            password: db_pass,
+        };
 
+        let db = PostgresDBRaw::new(&postgres_config).await?;
 
+        let test_symbol = "TEST/HEALTH";
+        let older = Utc::now() - chrono::Duration::minutes(10);
+        let newer = Utc::now();
+        let rows = vec![
+            RawRow::new(older, "kraken".to_string(), FeedType::Trades, test_symbol.to_string(), serde_json::json!({ "n": 1 })),
+            RawRow::new(newer, "kraken".to_string(), FeedType::Trades, test_symbol.to_string(), serde_json::json!({ "n": 2 })),
+            RawRow::new(older, "kraken".to_string(), FeedType::Book, test_symbol.to_string(), serde_json::json!({ "n": 3 })),
+        ];
+        db.insert_raw_data_batch(&rows).await?;
 
+        let result = db.last_received_per_pipeline().await;
+
+        sqlx::query("DELETE FROM raw_financial_data WHERE symbol = $1")
+            .bind(test_symbol)
+            .execute(&db.pool)
+            .await?;
+
+        let mut ours: Vec<_> = result?.into_iter().filter(|(_, symbol, _, _)| symbol == test_symbol).collect();
+        ours.sort_by(|a, b| a.2.cmp(&b.2));
+
+        assert_eq!(ours.len(), 2, "one row per (provider, symbol, data_type)");
+        assert_eq!(ours[0].2, "book");
+        assert_eq!(ours[1].2, "trades");
+        // Postgres keeps microseconds, so compare to the second rather than exactly.
+        assert_eq!(ours[0].3.timestamp(), older.timestamp());
+        assert_eq!(ours[1].3.timestamp(), newer.timestamp(), "trades should report its newest row, not its oldest");
+
+        Ok(())
+    }
 }
 

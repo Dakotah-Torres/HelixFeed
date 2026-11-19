@@ -38,6 +38,32 @@ lazy_static!{
         &["provider", "symbol", "feed_type"]
     ).unwrap();
 
+    // Everything below is set by the health poller (src/health/mod.rs), not by the feeds.
+    pub static ref FEED_LAST_RECEIVED_TIMESTAMP: GaugeVec = GaugeVec::new(
+        Opts::new("helix_feed_last_received_timestamp_seconds", "Unix time of the newest raw row written for this pipeline, labeled by `provider`, `symbol`, `feed_type`"),
+        &["provider", "symbol", "feed_type"]
+    ).unwrap();
+
+    pub static ref ARCHIVE_LAST_RUN_TIMESTAMP: Gauge = Gauge::new(
+        "helix_archive_last_run_timestamp_seconds",
+        "Unix time the last archive run finished, success or not"
+    ).unwrap();
+
+    pub static ref ARCHIVE_LAST_RUN_SUCCESS: Gauge = Gauge::new(
+        "helix_archive_last_run_success",
+        "1 if the last archive run uploaded everything, 0 if anything failed"
+    ).unwrap();
+
+    pub static ref ARCHIVE_LAST_RUN_FILES: GaugeVec = GaugeVec::new(
+        Opts::new("helix_archive_last_run_files", "Files handled by the last archive run, labeled by `result` (uploaded|failed|corrupt)"),
+        &["result"]
+    ).unwrap();
+
+    pub static ref SYSTEMD_UNIT_ACTIVE: GaugeVec = GaugeVec::new(
+        Opts::new("helix_systemd_unit_active", "1 if the systemd unit is active, 0 otherwise, labeled by `unit`"),
+        &["unit"]
+    ).unwrap();
+
 
 }
 
@@ -47,6 +73,11 @@ pub fn register_metrics() {
     REGISTRY.register(Box::new(BUFFER_SWAPS_TOTAL.clone())).unwrap();
     REGISTRY.register(Box::new(RECONNECT_ATTEMPTS_TOTAL.clone())).unwrap();
     REGISTRY.register(Box::new(FEED_UP.clone())).unwrap();
+    REGISTRY.register(Box::new(FEED_LAST_RECEIVED_TIMESTAMP.clone())).unwrap();
+    REGISTRY.register(Box::new(ARCHIVE_LAST_RUN_TIMESTAMP.clone())).unwrap();
+    REGISTRY.register(Box::new(ARCHIVE_LAST_RUN_SUCCESS.clone())).unwrap();
+    REGISTRY.register(Box::new(ARCHIVE_LAST_RUN_FILES.clone())).unwrap();
+    REGISTRY.register(Box::new(SYSTEMD_UNIT_ACTIVE.clone())).unwrap();
 }
 
 pub fn gather_metrics() -> String {

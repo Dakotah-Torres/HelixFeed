@@ -39,6 +39,7 @@ flowchart TB
             FR["feed_runner"]
             PIPE["N independent pipelines<br/>one per (symbol, feed_type)"]
             MET["metrics server :9091"]
+            HP["health poller (every 30 s)"]
         end
 
         NORM["normalize"]
@@ -58,6 +59,9 @@ flowchart TB
     PIPE --> LOGS
     FR --> PIPE
     MET -.-> PROM
+    PG -. "newest row per pipeline" .-> HP
+    ARCH -. "archive_status.json" .-> HP
+    HP --> MET
     PG --> NORM --> PG
     NORM --> DISK
     DISK --> ARCH --> R2
@@ -81,6 +85,7 @@ flowchart TD
     FR --> M1["register_metrics()<br/>spawn start_metrics_server()"]
     FR --> M2["load_config → validate_config"]
     FR --> M3["PostgresDBRaw::new()<br/>PgPool, max 20 connections"]
+    FR --> M5["spawn HealthPoller::run()"]
     FR --> M4["watch::channel(false)<br/>shutdown signal"]
     FR --> LOOP{{"for provider in config.providers<br/>match provider.provider"}}
     LOOP -->|"&quot;kraken&quot;"| KRF["kraken_raw_feed_channel()<br/>returns Vec&lt;JoinHandle&gt;"]
@@ -159,7 +164,9 @@ Full step-by-step, including where data can be duplicated or lost, is in
 - ⚠️ **No provider abstraction yet.** `feed_runner` string-matches `"kraken"`, and the
   traits in `data_feeds/traits.rs` aren't used. Adding a provider means a parallel
   `<provider>_raw_feed_channel` function. See [change-guide.md](change-guide.md#add-a-new-provider).
-- ⚠️ **Metrics are registered but never updated.** `:9091/metrics` always reports zeros.
+- ⚠️ **Only health metrics are wired.** The health poller sets feed freshness, archiver
+  outcome, and timer state (see [monitoring.md](monitoring.md)). The per-message counters
+  (`helix_messages_total` and friends) still always report 0.
 - ⚠️ **Book/L3 normalization drops the `type` field** (`snapshot` vs `update`), so you
   can't rebuild the book from `book_normalized` alone. The raw Parquet still has it.
 - ⚠️ **`received` is per batch, not per message.** It's set when the buffer is converted,

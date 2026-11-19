@@ -75,7 +75,7 @@ pub(crate) async fn run_trade_feed(url: &str, symbols: Vec<String>, tx: mpsc::Se
                         let mut log = logger.lock().unwrap();
                         log.feed_log(LogType::Info, "Connected", &log_ctx);
                     }
-                    // TODO(v1.1.0 metrics): FEED_UP{provider,symbol,feed_type}.set(1) here
+                    // TODO(v1.1.0 metrics): a new FEED_CONNECTED{provider,symbol,feed_type} gauge (not FEED_UP - the health poller owns that).set(1) here
                     stream
                 }
                 Err(e) => {
@@ -100,7 +100,7 @@ pub(crate) async fn run_trade_feed(url: &str, symbols: Vec<String>, tx: mpsc::Se
             // See docs/logging.md - timeout wraps every read so a silently-dead connection
             // (socket never errors, never closes, Kraken just stops sending) still produces
             // a log line and forces a reconnect instead of blocking forever.
-            // TODO(v1.1.0 metrics): FEED_UP{provider,symbol,feed_type}.set(0) on every `break`
+            // TODO(v1.1.0 metrics): a new FEED_CONNECTED{provider,symbol,feed_type} gauge (not FEED_UP - the health poller owns that).set(0) on every `break`
             // in this inner loop (stale timeout, stream end, close frame, read error, receiver dropped).
             loop {
                 let next = tokio::time::timeout(

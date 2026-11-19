@@ -6,6 +6,7 @@ use std::fs::{OpenOptions, remove_file};
 use std::io::{Seek, SeekFrom, Write, Read};
 use crate::logging::LogType;
 use crate::logging::sys_logger::SysLogger;
+use crate::archive::status::ArchiveRunSummary;
 
 pub const PARQUET_ARCHIVE_READY: &str = "parquet_archive/ready";
 pub const PARQUET_ARCHIVE_FAILD: &str = "parquet_archive/failed";
@@ -133,12 +134,10 @@ impl R2Archiver {
 
     
 
-    // TODO(v1.1.0 metrics): helix_archive_uploads_total{result="ok"|"failed"|"corrupt"} counter
-    // around the match arms below - every branch is already logged individually via SysLogger,
-    // just not counted. Note this runs as a short-lived systemd-timer process, not the
-    // long-running daemon, so it exits before ever hitting a Prometheus scrape on :9091 - needs
-    // either a Pushgateway or log-based metrics instead of the pull-based REGISTRY pattern.
-    pub async fn archiver(&mut self) -> Result<(), anyhow::Error> {
+    /// Returns what happened this run - bin/archive.rs saves it to the status file the daemon
+    /// publishes on /metrics (see archive/status.rs).
+    pub async fn archiver(&mut self) -> Result<ArchiveRunSummary, anyhow::Error> {
+        let mut summary = ArchiveRunSummary::default();
         //Checking failed folder first
 
         for file in Self::list_parquet_files(PARQUET_ARCHIVE_FAILD)? {
@@ -146,6 +145,7 @@ impl R2Archiver {
             let prefix = Self::get_file_prefix(&file_path)?;
             match self.r2_archiver(&file_path, prefix).await{
                 Ok(()) => {
+                    summary.uploaded += 1;
                     self.logging.sys_log(LogType::Info, &format!("Uploaded {} to R2", file_path.display()));
 
                     match std::fs::remove_file(file_path) {
@@ -175,12 +175,19 @@ impl R2Archiver {
                     let file_name = file_path.file_name().expect("file has no name").to_str().expect("Invalid Path");
                     match Self::log_failed(file_name) {
                         Ok((attempts, fail_sidecar)) => {
-                            if let Err(corrupt_err) = self.corrupt_clean_up(file_path, attempts, fail_sidecar) {
-                                self.logging.sys_log(LogType::Error, &format!("Failed to move {} to corrupt/: {}", file_path.display(), corrupt_err));
+                            let quarantined = attempts > self.r2_conf.max_upload_attempts;
+                            match self.corrupt_clean_up(file_path, attempts, fail_sidecar) {
+                                Ok(()) if quarantined => summary.corrupt += 1,
+                                Ok(()) => summary.failed += 1,
+                                Err(corrupt_err) => {
+                                    summary.failed += 1;
+                                    self.logging.sys_log(LogType::Error, &format!("Failed to move {} to corrupt/: {}", file_path.display(), corrupt_err));
+                                }
                             }
                             continue;
                         }
                         Err(log_err) => {
+                            summary.failed += 1;
                             self.logging.sys_log(LogType::Error, &format!("Failed to update retry sidecar for {}: {}", file_path.display(), log_err));
                             continue;
                         }
@@ -193,8 +200,9 @@ impl R2Archiver {
         for file in Self::list_parquet_files(PARQUET_ARCHIVE_READY)? {
             let file_path: &Path  = file.as_path();
             let prefix = Self::get_file_prefix(&file_path)?;
-            match self.r2_archiver(&file_path, prefix).await {  
+            match self.r2_archiver(&file_path, prefix).await {
                 Ok(()) => {
+                    summary.uploaded += 1;
                     self.logging.sys_log(LogType::Info, &format!("Uploaded {} to R2", file_path.display()));
 
                     match std::fs::remove_file(file_path) {
@@ -209,6 +217,7 @@ impl R2Archiver {
                     continue;
                 },
                 Err(e) => {
+                    summary.failed += 1;
                     self.logging.sys_log(LogType::Warn, &format!("Upload failed for {}: {} - moving to failed/", file_path.display(), e));
 
                     let failed_path = PathBuf::from(PARQUET_ARCHIVE_FAILD).join(file.file_name().unwrap());
@@ -223,10 +232,10 @@ impl R2Archiver {
                     continue;
                 }
             };
-            
+
         }
 
-            Ok(())
+            Ok(summary)
     }
 
 }

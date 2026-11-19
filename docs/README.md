@@ -18,9 +18,11 @@ You don't need to read all of this. Pick by what you're doing:
 | Change a value in `helix_config.yml` or `.env` | [configuration.md](configuration.md) |
 | Touch a table, a column, or a migration | [database.md](database.md) |
 | Deploy, restart, or debug on the quant server | [operations.md](operations.md) |
+| Know what is **actually** deployed on `quant-node` (paths, ports, state, incidents) | [production.md](production.md) |
 | **Make a change by hand** (add a symbol, feed type, provider, column, metric…) | [change-guide.md](change-guide.md) |
 | Run or write tests | [testing.md](testing.md) |
 | Find out what a log line means | [logging.md](logging.md) |
+| Know whether it's up, and point Prometheus/Grafana at it | [monitoring.md](monitoring.md) |
 | See where the project is going | [roadmap.md](roadmap.md), [provider-pattern.md](provider-pattern.md) |
 
 ## The one-paragraph version

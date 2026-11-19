@@ -193,6 +193,26 @@ failed insert used to end it permanently).
   suspicious. Left on stderr rather than `SysLogger` since there's no per-provider log
   context to attach it to and it's genuinely unreachable in normal operation.
 
+### `src/health/mod.rs` — the health poller
+
+Writes to `system.log` as `Health Poller`, and **only when something changes state**, so
+a feed that stays down for a day produces one line, not 2 880. Every line in this section
+is a report about another component; the cause is in that component's own log lines.
+
+- **`"{provider} | {symbol} | {type} is UP"`** (`Info`) — on the first check after startup,
+  and after recovering from DOWN.
+- **`"… is DOWN - newest row is from {ts}, over 300s ago"`** / **`"… is DOWN - no recent
+  rows at all"`** (`Error`) — nothing new in the raw table for that pipeline for 5 minutes.
+  This is the line the 2026-10-09 outage needed. Check that pipeline in `kraken.log`.
+- **`"Feed freshness query failed: {e} …"`** / **`"… is working again"`** (`Error`/`Info`) —
+  the poller couldn't read Postgres. Feed gauges keep their last value meanwhile.
+- **`"Archiver OK - run at …"`** / **`"Archiver FAILING - run at …: N uploaded, N failed, N
+  moved to corrupt (…)"`** (`Info`/`Error`) — the result from `archive_status.json`. The
+  per-file reasons are in the `R2 Archiver` lines around that time.
+- **`"systemd unit {unit} is active"`** / **`"… is NOT active - its job is not being
+  scheduled"`** (`Info`/`Warn`) — `helixfeed-normalize.timer` or `helixfeed-archive.timer`
+  was stopped or disabled.
+
 ## Gaps / future work
 
 Things this pass deliberately did **not** fix, so they don't get lost:
@@ -205,12 +225,11 @@ Things this pass deliberately did **not** fix, so they don't get lost:
   insert in the first place.
 - **Batch jobs log to stdout.** `normalize` and `backfill` use `println!`, so their output
   only exists in the systemd journal (`journalctl -u helixfeed-normalize`).
-- **No metrics wired up.** `src/metrics/prometheus.rs` already defines `FEEDS_RUNNING`,
-  `TOTAL_MESSAGES`, `BUFFER_SWAPS_TOTAL`, `RECONNECT_ATTEMPTS_TOTAL`, and `FEED_UP`, and
-  they're registered and served on `:9091/metrics` — but nothing in the codebase actually
-  increments or sets any of them yet. Wiring these up at the same points documented above
-  is the natural next step for dashboards/alerting instead of log-grepping, and is planned
-  as separate, hands-on follow-up work rather than part of this logging pass.
+- **Per-message metrics not wired up.** The health metrics are live now (the health poller
+  sets `FEED_UP` and friends, see [monitoring.md](monitoring.md)), but `FEEDS_RUNNING`,
+  `TOTAL_MESSAGES`, `BUFFER_SWAPS_TOTAL` and `RECONNECT_ATTEMPTS_TOTAL` are still never
+  touched. Wiring them up at the points documented above is planned as separate, hands-on
+  follow-up work.
 - **`STALE_CONNECTION_TIMEOUT_SECS` is one global constant**, not tunable per feed type or
   per symbol. If Trades/Book/Orders end up needing meaningfully different thresholds, this
   would need to move into `ProviderConfig`/`SymbolConfig` and flow through from

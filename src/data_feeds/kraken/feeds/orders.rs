@@ -143,7 +143,7 @@ where
                     let mut log = logger.lock().unwrap();
                     log.feed_log(LogType::Info, "Connected", &log_ctx);
                 }
-                // TODO(v1.1.0 metrics): FEED_UP{provider,symbol,feed_type}.set(1) here
+                // TODO(v1.1.0 metrics): a new FEED_CONNECTED{provider,symbol,feed_type} gauge (not FEED_UP - the health poller owns that).set(1) here
                 stream
             }
 
@@ -171,7 +171,7 @@ where
         // errored or closed" — this is exactly what took BTC/USD Orders down on 2026-09-10:
         // it went quiet at 21:19:16 and stream.next() just sat there forever with no log
         // output at all, no error, nothing. See docs/logging.md for the full breakdown.
-        // TODO(v1.1.0 metrics): FEED_UP{provider,symbol,feed_type}.set(0) on every `break`
+        // TODO(v1.1.0 metrics): a new FEED_CONNECTED{provider,symbol,feed_type} gauge (not FEED_UP - the health poller owns that).set(0) on every `break`
         // in this inner loop (stale timeout, stream end, close frame, read error, receiver dropped).
         loop {
             let next = tokio::time::timeout(
